@@ -1,0 +1,40 @@
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nudge-dashboard
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      NUDGE_DASHBOARD_HOST: 0.0.0.0
+      NUDGE_DASHBOARD_PORT: 8765
+      NUDGE_DATA_DIR: /app/data
+      NUDGE_MODEL: qwen2.5:3b
+      NUDGE_EMBED_MODEL: nomic-embed-text
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: python -m app.dashboard
+    restart: unless-stopped
+
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      NUDGE_DATA_DIR: /app/data
+      NUDGE_MODEL: qwen2.5:3b
+      NUDGE_EMBED_MODEL: nomic-embed-text
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: python -m app.main
+    stdin_open: true
+    tty: true
+    profiles:
+      - cli

@@ -1,0 +1,4 @@
+# Minimal dependencies (all local; no cloud APIs)
+requests>=2.31
+faiss-cpu>=1.8
+langgraph>=0.2

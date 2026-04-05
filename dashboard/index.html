@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nudge Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Nudge - your second local brain</p>
+          <p class="lede">
+            Chat, inspect your memory, review your week, and keep an eye on patterns without leaving your machine.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refreshBtn" class="ghost">Refresh</button>
+          <button id="reviewBtn" class="primary">Weekly Review</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel chat-panel">
+          <div class="panel-head">
+            <h2>Conversation</h2>
+            <div class="panel-head-actions">
+              <button id="openProjectModalBtn" class="ghost mini">Add Project</button>
+              <span class="panel-tag">local chat</span>
+            </div>
+          </div>
+          <input id="conversationSearchInput" class="panel-search" type="search" placeholder="Search conversation..." />
+          <div id="chatFeed" class="chat-feed"></div>
+          <form id="chatForm" class="chat-form">
+            <textarea id="chatInput" rows="3" placeholder="Ask Nudge something..."></textarea>
+            <button class="primary" type="submit">Send</button>
+          </form>
+        </article>
+
+        <article class="panel metrics-panel">
+          <div class="panel-head">
+            <h2>Snapshot</h2>
+            <span class="panel-tag">memory health</span>
+          </div>
+          <div id="summaryCards" class="cards"></div>
+          <div class="mini-section">
+            <h3>Current Focus</h3>
+            <div id="focusChips" class="chips"></div>
+          </div>
+          <div class="mini-section">
+            <h3>Interests</h3>
+            <div id="interestChips" class="chips"></div>
+          </div>
+        </article>
+
+        <article class="panel timeline-panel">
+          <div class="panel-head">
+            <h2>Activity Trend</h2>
+            <span class="panel-tag">last 14 days</span>
+          </div>
+          <div id="trendBars" class="trend-bars"></div>
+        </article>
+
+        <article class="panel memories-panel">
+          <div class="panel-head">
+            <h2>Recent Memory</h2>
+            <span class="panel-tag">logs + notes</span>
+          </div>
+          <input id="memorySearchInput" class="panel-search" type="search" placeholder="Search logs and notes..." />
+          <div class="memory-columns">
+            <div>
+              <h3>Logs</h3>
+              <div id="recentLogs" class="stack"></div>
+            </div>
+            <div>
+              <h3>Notes</h3>
+              <div id="recentNotes" class="stack"></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel projects-panel">
+          <div class="panel-head">
+            <h2>Projects</h2>
+            <div class="panel-head-actions">
+              <button id="openProjectPanelBtn" class="ghost mini">Add Project</button>
+              <span class="panel-tag">goals</span>
+            </div>
+          </div>
+          <input id="projectsSearchInput" class="panel-search" type="search" placeholder="Search projects and goals..." />
+          <div id="projectsList" class="stack"></div>
+        </article>
+
+        <article class="panel timeline-stream-panel">
+          <div class="panel-head">
+            <h2>Timeline</h2>
+            <div class="panel-head-actions">
+              <button id="timelineToggleBtn" class="ghost mini hidden" type="button">Show More</button>
+              <span class="panel-tag">recent activity</span>
+            </div>
+          </div>
+          <input id="timelineSearchInput" class="panel-search" type="search" placeholder="Search timeline..." />
+          <div id="timelineList" class="stack"></div>
+        </article>
+
+        <article class="panel reminders-panel">
+          <div class="panel-head">
+            <h2>Reminders</h2>
+            <span class="panel-tag">upcoming</span>
+          </div>
+          <input id="remindersSearchInput" class="panel-search" type="search" placeholder="Search reminders..." />
+          <div id="remindersList" class="stack"></div>
+        </article>
+
+        <article class="panel review-panel">
+          <div class="panel-head">
+            <h2>Weekly Review</h2>
+            <span class="panel-tag">generated on demand</span>
+          </div>
+          <pre id="reviewText" class="review-text">Press "Weekly Review" to generate a fresh review.</pre>
+        </article>
+      </section>
+    </main>
+
+    <div id="projectModal" class="modal-shell hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow modal-eyebrow">Project Setup</p>
+            <h2>Add A Project</h2>
+          </div>
+          <button id="closeProjectModalBtn" class="ghost mini" type="button">Close</button>
+        </div>
+
+        <form id="projectForm" class="modal-form">
+          <p id="projectModalMessage" class="modal-message hidden" role="status" aria-live="polite"></p>
+          <label id="projectNameField" class="field">
+            <span>Project name</span>
+            <input id="projectNameInput" type="text" placeholder="Health, Nudge, Career..." />
+          </label>
+          <label id="projectGoalField" class="field">
+            <span>First goal (optional)</span>
+            <input id="projectGoalInput" type="text" placeholder="Play badminton twice this week" />
+          </label>
+          <div class="modal-actions">
+            <button id="projectSubmitBtn" class="primary" type="submit">Create Project</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <template id="chatRowTemplate">
+      <div class="chat-row">
+        <div class="bubble user"></div>
+        <div class="bubble assistant"></div>
+      </div>
+    </template>
+    <script src="app.js"></script>
+  </body>
+</html>
