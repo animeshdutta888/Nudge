@@ -22,6 +22,8 @@ from app.tools.reminders import list_reminders
 from app.services.storage import ensure_json_file, read_json, write_json
 from app.utils.time import now_local_iso
 from app.tools.repair import delete_recent, edit_recent, pin_recent
+from app.agent.state import StateStore
+from app.utils.time import today_local_date
 
 
 def main() -> int:
@@ -35,6 +37,9 @@ def main() -> int:
             parsed = urlparse(self.path)
             if parsed.path == "/api/overview":
                 payload = build_dashboard_payload(cfg.data_dir)
+                daily = payload.get("daily_checkin")
+                if isinstance(daily, dict) and bool(daily.get("should_prompt")):
+                    StateStore(cfg.state_path).mark_daily_checkin_prompted(today_local_date().isoformat())
                 payload["graph_enabled"] = LANGGRAPH_AVAILABLE
                 self._send_json(payload)
                 return
@@ -57,6 +62,9 @@ def main() -> int:
                     return
                 if parsed.path == "/api/pending-save":
                     self._handle_pending_save()
+                    return
+                if parsed.path == "/api/daily-checkin":
+                    self._handle_daily_checkin()
                     return
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -237,6 +245,41 @@ def main() -> int:
                     "overview": overview,
                     "pending_action": overview.get("pending_action"),
                     "graph_enabled": LANGGRAPH_AVAILABLE,
+                }
+            )
+
+        def _handle_daily_checkin(self) -> None:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                data = json.loads(body.decode("utf-8"))
+            except json.JSONDecodeError:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid JSON")
+                return
+            action = str(data.get("action", "")).strip().lower()
+            state = StateStore(cfg.state_path)
+            today_iso = today_local_date().isoformat()
+            if action == "dismiss":
+                state.dismiss_daily_checkin_for_day(today_iso)
+                self._send_json({"ok": True, "overview": build_dashboard_payload(cfg.data_dir)})
+                return
+            if action != "submit":
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid action")
+                return
+
+            energy = str(data.get("energy", "")).strip() or "n/a"
+            focus = str(data.get("focus", "")).strip() or "n/a"
+            win = str(data.get("win", "")).strip() or "n/a"
+            entry = f"Daily check-in: energy={energy}; focus={focus}; win={win}"
+            reply = run_agent(f"log: {entry}", cfg=cfg, source="dashboard")
+            state.clear_daily_checkin_dismissal(today_iso)
+            overview = build_dashboard_payload(cfg.data_dir)
+            self._send_json(
+                {
+                    "ok": True,
+                    "reply": reply,
+                    "reply_display": reply,
+                    "overview": overview,
                 }
             )
 

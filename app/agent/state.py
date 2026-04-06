@@ -34,6 +34,10 @@ class StateStore:
                 "autosave_enabled": True,
                 "asked_questions": [],
                 "last_question": None,
+                "daily_checkin": {
+                    "last_prompt_date": None,
+                    "dismissed_date": None,
+                },
             },
         )
 
@@ -44,6 +48,10 @@ class StateStore:
             "autosave_enabled": True,
             "asked_questions": [],
             "last_question": None,
+            "daily_checkin": {
+                "last_prompt_date": None,
+                "dismissed_date": None,
+            },
         }
 
     def autosave_enabled(self) -> bool:
@@ -159,4 +167,48 @@ class StateStore:
             state["asked_questions"] = []
         if "last_question" not in state:
             state["last_question"] = None
+        write_json(self._path, state)
+
+    def daily_checkin_state(self) -> dict[str, Any]:
+        state = read_json(self._path, default=self._default_state())
+        if not isinstance(state, dict):
+            return {"last_prompt_date": None, "dismissed_date": None}
+        raw = state.get("daily_checkin")
+        if not isinstance(raw, dict):
+            return {"last_prompt_date": None, "dismissed_date": None}
+        return {
+            "last_prompt_date": raw.get("last_prompt_date"),
+            "dismissed_date": raw.get("dismissed_date"),
+        }
+
+    def mark_daily_checkin_prompted(self, day_iso: str) -> None:
+        state = read_json(self._path, default=self._default_state())
+        if not isinstance(state, dict):
+            state = self._default_state()
+        raw = state.get("daily_checkin")
+        daily = raw if isinstance(raw, dict) else {}
+        daily["last_prompt_date"] = str(day_iso)
+        state["daily_checkin"] = daily
+        write_json(self._path, state)
+
+    def dismiss_daily_checkin_for_day(self, day_iso: str) -> None:
+        state = read_json(self._path, default=self._default_state())
+        if not isinstance(state, dict):
+            state = self._default_state()
+        raw = state.get("daily_checkin")
+        daily = raw if isinstance(raw, dict) else {}
+        daily["dismissed_date"] = str(day_iso)
+        daily["last_prompt_date"] = str(day_iso)
+        state["daily_checkin"] = daily
+        write_json(self._path, state)
+
+    def clear_daily_checkin_dismissal(self, day_iso: str) -> None:
+        state = read_json(self._path, default=self._default_state())
+        if not isinstance(state, dict):
+            state = self._default_state()
+        raw = state.get("daily_checkin")
+        daily = raw if isinstance(raw, dict) else {}
+        if daily.get("dismissed_date") == str(day_iso):
+            daily["dismissed_date"] = None
+        state["daily_checkin"] = daily
         write_json(self._path, state)

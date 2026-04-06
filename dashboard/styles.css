@@ -459,6 +459,10 @@ textarea {
   box-shadow: 0 30px 90px rgba(25, 33, 38, 0.22);
 }
 
+.checkin-card {
+  width: min(620px, calc(100vw - 28px));
+}
+
 .modal-head {
   display: flex;
   justify-content: space-between;
@@ -476,6 +480,12 @@ textarea {
 .modal-form {
   display: grid;
   gap: 16px;
+}
+
+.modal-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .field {
@@ -511,6 +521,12 @@ textarea {
 .modal-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.modal-actions.split {
+  justify-content: space-between;
 }
 
 .review-text {
@@ -544,5 +560,9 @@ textarea {
 
   .chat-panel {
     grid-row: auto;
+  }
+
+  .modal-actions.split {
+    justify-content: flex-end;
   }
 }

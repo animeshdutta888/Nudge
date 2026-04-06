@@ -30,6 +30,15 @@ const projectNameField = document.getElementById("projectNameField");
 const projectGoalField = document.getElementById("projectGoalField");
 const projectSubmitBtn = document.getElementById("projectSubmitBtn");
 const projectModalMessage = document.getElementById("projectModalMessage");
+const dailyCheckinModal = document.getElementById("dailyCheckinModal");
+const dailyCheckinForm = document.getElementById("dailyCheckinForm");
+const dailyEnergyInput = document.getElementById("dailyEnergyInput");
+const dailyFocusInput = document.getElementById("dailyFocusInput");
+const dailyWinInput = document.getElementById("dailyWinInput");
+const dailyLaterBtn = document.getElementById("dailyLaterBtn");
+const dailySkipBtn = document.getElementById("dailySkipBtn");
+const dailySubmitBtn = document.getElementById("dailySubmitBtn");
+const dailyCheckinMessage = document.getElementById("dailyCheckinMessage");
 const MAX_VISIBLE_CHATS = 15;
 const MAX_VISIBLE_TIMELINE = 6;
 
@@ -39,6 +48,7 @@ let timelineExpanded = false;
 let timelineItems = [];
 let pendingActionActive = false;
 let pendingActionSubmitting = false;
+let dailyCheckinActive = false;
 const searchState = {
   conversation: "",
   memory: "",
@@ -87,6 +97,7 @@ function renderOverview(data) {
     visibleChats = (data.recent_conversations || []).slice(0, MAX_VISIBLE_CHATS);
     renderChat(visibleChats);
   }
+  syncDailyCheckin(data.daily_checkin || {});
 }
 
 function renderCards(summary) {
@@ -377,6 +388,15 @@ async function searchCard(card, query) {
   return await res.json();
 }
 
+async function submitDailyCheckin(action, payload = {}) {
+  const res = await fetch("/api/daily-checkin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  return await res.json();
+}
+
 async function loadReview() {
   reviewText.textContent = "Generating weekly review...";
   const res = await fetch("/api/review-week");
@@ -401,6 +421,12 @@ timelineToggleBtn.addEventListener("click", () => {
 openProjectModalBtn.addEventListener("click", () => openProjectModal("add-project"));
 openProjectPanelBtn.addEventListener("click", () => openProjectModal("add-project"));
 closeProjectModalBtn.addEventListener("click", closeProjectModal);
+dailyLaterBtn.addEventListener("click", closeDailyCheckinModal);
+dailySkipBtn.addEventListener("click", async () => {
+  await submitDailyCheckin("dismiss");
+  closeDailyCheckinModal();
+  await loadOverview();
+});
 
 projectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -459,9 +485,31 @@ projectForm.addEventListener("submit", async (event) => {
   }
 });
 
+dailyCheckinForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setDailyCheckinMessage("");
+  setDailyCheckinSubmitting(true);
+  const data = await submitDailyCheckin("submit", {
+    energy: dailyEnergyInput.value.trim(),
+    focus: dailyFocusInput.value.trim(),
+    win: dailyWinInput.value.trim(),
+  });
+  setDailyCheckinSubmitting(false);
+  if (!data.ok) {
+    setDailyCheckinMessage("Could not save your check-in just now.");
+    return;
+  }
+  closeDailyCheckinModal();
+  renderOverview(data.overview || {});
+});
+
 document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-close-modal='true']")) {
     closeProjectModal();
+    return;
+  }
+  if (event.target.closest("[data-close-checkin='dismiss']")) {
+    closeDailyCheckinModal();
     return;
   }
 
@@ -525,6 +573,10 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !projectModal.classList.contains("hidden")) {
     closeProjectModal();
+    return;
+  }
+  if (event.key === "Escape" && !dailyCheckinModal.classList.contains("hidden")) {
+    closeDailyCheckinModal();
   }
 });
 
@@ -647,6 +699,49 @@ function closeProjectModal() {
   projectModalState = { mode: "add-project", project: "", goalIndex: 0 };
   projectNameInput.readOnly = false;
   projectForm.reset();
+}
+
+function syncDailyCheckin(state) {
+  dailyCheckinActive = Boolean(state.should_prompt);
+  if (dailyCheckinActive) {
+    openDailyCheckinModal();
+    return;
+  }
+  closeDailyCheckinModal();
+}
+
+function openDailyCheckinModal() {
+  dailyCheckinModal.classList.remove("hidden");
+  dailyCheckinModal.setAttribute("aria-hidden", "false");
+  dailyEnergyInput.focus();
+}
+
+function closeDailyCheckinModal() {
+  dailyCheckinActive = false;
+  dailyCheckinModal.classList.add("hidden");
+  dailyCheckinModal.setAttribute("aria-hidden", "true");
+  setDailyCheckinMessage("");
+  setDailyCheckinSubmitting(false);
+}
+
+function setDailyCheckinMessage(text) {
+  if (!text) {
+    dailyCheckinMessage.textContent = "";
+    dailyCheckinMessage.classList.add("hidden");
+    return;
+  }
+  dailyCheckinMessage.textContent = text;
+  dailyCheckinMessage.classList.remove("hidden");
+}
+
+function setDailyCheckinSubmitting(isSubmitting) {
+  dailyEnergyInput.disabled = isSubmitting;
+  dailyFocusInput.disabled = isSubmitting;
+  dailyWinInput.disabled = isSubmitting;
+  dailyLaterBtn.disabled = isSubmitting;
+  dailySkipBtn.disabled = isSubmitting;
+  dailySubmitBtn.disabled = isSubmitting;
+  dailySubmitBtn.textContent = isSubmitting ? "Saving..." : "Start Check-in";
 }
 
 loadOverview();

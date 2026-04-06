@@ -152,6 +152,40 @@
       </div>
     </div>
 
+    <div id="dailyCheckinModal" class="modal-shell hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-checkin="dismiss"></div>
+      <div class="modal-card checkin-card">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow modal-eyebrow">Daily Rhythm</p>
+            <h2>Quick Check-in</h2>
+          </div>
+        </div>
+
+        <form id="dailyCheckinForm" class="modal-form">
+          <p class="modal-copy">First visit today. Want to log a short check-in before you dive in?</p>
+          <p id="dailyCheckinMessage" class="modal-message hidden" role="status" aria-live="polite"></p>
+          <label class="field">
+            <span>Energy</span>
+            <input id="dailyEnergyInput" type="text" placeholder="6, high, low..." />
+          </label>
+          <label class="field">
+            <span>Focus</span>
+            <input id="dailyFocusInput" type="text" placeholder="What matters most today?" />
+          </label>
+          <label class="field">
+            <span>One win</span>
+            <input id="dailyWinInput" type="text" placeholder="Small counts." />
+          </label>
+          <div class="modal-actions split">
+            <button id="dailyLaterBtn" class="ghost" type="button">Remind Me Later</button>
+            <button id="dailySkipBtn" class="ghost" type="button">Skip Today</button>
+            <button id="dailySubmitBtn" class="primary" type="submit">Start Check-in</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <template id="chatRowTemplate">
       <div class="chat-row">
         <div class="bubble user"></div>

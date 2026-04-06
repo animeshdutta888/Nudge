@@ -6,6 +6,7 @@ services:
     container_name: nudge-dashboard
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      NUDGE_TIMEZONE: Asia/Kolkata
       NUDGE_DASHBOARD_HOST: 0.0.0.0
       NUDGE_DASHBOARD_PORT: 8765
       NUDGE_DATA_DIR: /app/data
@@ -26,6 +27,7 @@ services:
       dockerfile: Dockerfile
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      NUDGE_TIMEZONE: Asia/Kolkata
       NUDGE_DATA_DIR: /app/data
       NUDGE_MODEL: qwen2.5:3b
       NUDGE_EMBED_MODEL: nomic-embed-text

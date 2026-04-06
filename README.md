@@ -129,7 +129,7 @@ ollama pull nomic-embed-text
 ### 2. Local Python setup
 
 ```bash
-cd <project_dir>
+cd Nudge
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -144,11 +144,12 @@ ollama serve
 If you are using the Ollama desktop app and it is already running, you may not need to start it manually.
 
 ## Running Nudge
-Clone from github repository.
+git clone https://github.com/animeshdutta888/Nudge.git
+cd Nudge
 ### CLI
 
 ```bash
-cd <project_dir>
+cd Nudge
 source .venv/bin/activate
 python -m app.main
 ```
@@ -156,7 +157,7 @@ python -m app.main
 ### Dashboard
 
 ```bash
-cd <project_dir>
+cd Nudge
 source .venv/bin/activate
 python -m app.dashboard
 ```
@@ -172,9 +173,9 @@ http://127.0.0.1:8765
 Nudge supports an easy local Docker flow for the dashboard while keeping Ollama on the host machine.
 
 ### Start with Docker
-
+git clone https://github.com/animeshdutta888/Nudge.git
 ```bash
-cd <project_dir>
+cd Nudge
 docker compose up --build -d dashboard
 ```
 

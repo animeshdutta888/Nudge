@@ -6,6 +6,7 @@ from typing import Any
 
 from app.services.conversations import load_conversations
 from app.services.storage import read_json
+from app.agent.state import StateStore
 from app.tools.projects import load_projects
 from app.tools.repair import recent_items
 from app.utils.time import parse_iso_to_local_date, today_local_date
@@ -20,6 +21,7 @@ def build_dashboard_payload(data_dir: Path) -> dict[str, Any]:
     conversations = load_conversations(data_dir / "conversations.json", limit=80)
     recent_logs = recent_items(data_dir / "logs.json", limit=10)
     recent_notes = recent_items(data_dir / "notes.json", limit=10)
+    daily_checkin = _daily_checkin_prompt(data_dir, logs)
 
     today = today_local_date()
     logs_today = [x for x in logs if _same_day(x.get("ts", ""), today)]
@@ -59,6 +61,7 @@ def build_dashboard_payload(data_dir: Path) -> dict[str, Any]:
             for day, count in sorted(log_days.items())[-14:]
         ],
         "pending_action": _pending_action(data_dir / "state.json"),
+        "daily_checkin": daily_checkin,
     }
 
 
@@ -226,3 +229,22 @@ def _pending_action(path: Path) -> dict[str, Any] | None:
     if isinstance(pending_save, dict):
         return {"kind": "save", **pending_save}
     return None
+
+
+def _daily_checkin_prompt(data_dir: Path, logs: list[dict[str, Any]]) -> dict[str, Any]:
+    today = today_local_date().isoformat()
+    has_completed = any(
+        isinstance(item, dict)
+        and _same_day(str(item.get("ts", "")), today_local_date())
+        and str(item.get("text", "")).strip().lower().startswith("daily check-in:")
+        for item in logs
+    )
+    state = StateStore(data_dir / "state.json").daily_checkin_state()
+    dismissed_date = str(state.get("dismissed_date") or "")
+    last_prompt_date = str(state.get("last_prompt_date") or "")
+    should_prompt = not has_completed and dismissed_date != today and last_prompt_date != today
+    return {
+        "should_prompt": should_prompt,
+        "completed_today": has_completed,
+        "dismissed_today": dismissed_date == today,
+    }
