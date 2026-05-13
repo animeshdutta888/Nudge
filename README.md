@@ -5,9 +5,9 @@
 It combines:
 - a CLI for fast daily use
 - a dashboard for chat, memory, projects, reminders, and analytics
-- local memory and retrieval
-- Ollama for local reasoning
-- an agent-style workflow that can suggest saves, plan multi-step actions, and ask for approval before important changes
+- local memory + retrieval (JSON + FAISS)
+- Ollama for local reasoning + embeddings
+- an agent-style workflow with governance/validation, semantic cache, and approval-based saves/plans
 
 ## Why Nudge
 
@@ -75,35 +75,102 @@ Nudge is built to stay on your machine.
 ## Architecture
 
 ```text
-CLI / Dashboard
-      |
-      v
-  Agent Core
-      |
-      +--> Planner / routing
-      +--> Memory manager
-      +--> Persona builder
-      +--> Retrieval
-      +--> Projects / reminders / repair tools
-      |
-      v
- Local Ollama + Local JSON/FAISS state
++-------------------+        +--------------------+
+| CLI (app.main)    |        | Dashboard (HTTP)   |
+| `python -m ...`   |        | `python -m ...`    |
++---------+---------+        +---------+----------+
+          |                            |
+          +------------+---------------+
+                       v
+            +-------------------------+
+            | app.agent.core          |
+            | - runtime reuse per     |
+            |   NUDGE_DATA_DIR        |
+            +------------+------------+
+                         v
+            +-------------------------+
+            | runtime.NudgeRuntime    |
+            | - commands/smalltalk    |
+            | - approval actions      |
+            | - orchestrates run      |
+            +------------+------------+
+                         v
+            +-------------------------+
+            | OrchestrationEngine     |
+            | -> ManagerAgent         |
+            +------------+------------+
+                         v
+     +-------------------+-------------------+-------------------+
+     | Governance        | Retrieval         | Memory            |
+     | (pre + post)      | (FAISS + embeds)  | (notes/logs/etc)  |
+     +-------------------+-------------------+-------------------+
+                         |                   |
+                         v                   v
+                 +---------------+     +------------------+
+                 | SemanticCache |     | Synthesis + Critic|
+                 | (local reuse) |     | (answer + validate)|
+                 +-------+-------+     +---------+--------+
+                         |                       |
+                         +-----------+-----------+
+                                     v
+                           +--------------------+
+                           | Response           |
+                           | + Execution traces |
+                           +--------------------+
+
+Data plane (local):
+- Ollama: chat + embeddings (OLLAMA_BASE_URL)
+- data/: JSON + FAISS index + semantic cache + state
+- execution_traces.sqlite3: per-run trace + timings
 ```
+
+### What "multi-agent" means here
+
+Nudge uses a small set of specialized agents coordinated by a manager:
+- `GovernanceAgent`: safety checks before and after synthesis; can reject or degrade execution
+- `RetrievalAgent`: retrieves relevant local context via FAISS + embeddings
+- `MemoryAgent`: reads/writes local notes/logs/persona and related state
+- `SynthesisAgent`: produces the final answer (grounded by retrieved/memory context when available)
+- `CriticAgent`: validates the output and can force a degraded response path
+- `ManagerAgent`: orchestrates the above with retries, timeouts, and a global budget
+- Optional LangGraph paths are used when available; core runtime works without it.
+
+### Caching and reuse
+
+Nudge stores a local semantic cache keyed by (query + model ids + local data version):
+- Cache hit: returns the cached answer + citations quickly
+- Cache miss: runs retrieval/memory/synthesis, then stores the result
+
+### Approval-based writes
+
+Nudge supports explicit saves (`note: ...`, `log: ...`) and approval-gated actions:
+- `approve` / `skip` finalizes or discards pending saves/plans
+- Dashboard exposes the same flow via UI actions
+
+### Observability and degraded mode
+
+- Each run gets a `run_id` and emits step-level trace events to `data/execution_traces.sqlite3`.
+- If governance/critic fails, context is missing, or budgets/timeouts are exceeded, Nudge switches to a constrained degraded response path.
 
 ## Project Structure
 
 ```text
-nudge/
+Nudge/
+├── agents/            # retrieval/memory/synthesis/critic/manager/governance
 ├── app/
-│   ├── agent/         # core agent logic, prompts, graph, memory, planner
-│   ├── models/        # dataclasses / typed structures
-│   ├── persona/       # persona extraction and schema
-│   ├── services/      # llm, storage, retrieval, conversations
-│   ├── tools/         # insights, projects, reminders, activities, repair
+│   ├── agent/         # runtime bridge + optional LangGraph paths
+│   ├── persona/       # persona extraction + snapshot refresh
+│   ├── services/      # llm, storage, retrieval, semantic cache
+│   ├── tools/         # insights, projects, reminders, repair, dashboard data
 │   ├── dashboard.py   # local dashboard server
 │   └── main.py        # CLI entry point
 ├── dashboard/         # static dashboard assets
-├── data/              # local memory, reminders, persona, embeddings
+├── data/              # local state (json + faiss + sqlite traces)
+├── observability/     # execution logging/tracing
+├── orchestration/     # orchestration engine
+├── runtime/           # NudgeRuntime (agent loop + command routing)
+├── schemas/           # shared state models
+├── storage/           # local workspace helpers
 ├── scripts/           # helper scripts
 ├── Dockerfile
 ├── docker-compose.yml
@@ -144,8 +211,12 @@ ollama serve
 If you are using the Ollama desktop app and it is already running, you may not need to start it manually.
 
 ## Running Nudge
+
+```bash
 git clone https://github.com/animeshdutta888/Nudge.git
 cd Nudge
+```
+
 ### CLI
 
 ```bash
@@ -168,12 +239,37 @@ Then open:
 http://127.0.0.1:8765
 ```
 
+## Configuration
+
+Nudge is configured via environment variables (all optional; defaults shown):
+
+```bash
+# Ollama + models
+export OLLAMA_BASE_URL="http://localhost:11434"
+export NUDGE_MODEL="qwen2.5:3b"
+export NUDGE_EMBED_MODEL="nomic-embed-text"
+
+# Local data directory (JSON/FAISS/sqlite traces live here)
+export NUDGE_DATA_DIR="./data"
+
+# Dashboard
+export NUDGE_DASHBOARD_HOST="127.0.0.1"
+export NUDGE_DASHBOARD_PORT="8765"
+
+# Runtime limits/tuning
+export NUDGE_TIMEOUT_S="25"
+export NUDGE_AGENT_TIMEOUT_S="15"
+export NUDGE_GLOBAL_BUDGET_S="25"
+export NUDGE_MAX_RETRIES="2"
+export NUDGE_SEMANTIC_CACHE_THRESHOLD="0.75"
+```
+
 ## Docker Deployment
 
 Nudge supports an easy local Docker flow for the dashboard while keeping Ollama on the host machine.
 
 ### Start with Docker
-git clone https://github.com/animeshdutta888/Nudge.git
+
 ```bash
 cd Nudge
 docker compose up --build -d dashboard
@@ -190,6 +286,7 @@ http://127.0.0.1:8765
 - The dashboard container talks to host Ollama using `host.docker.internal`
 - Your local memory persists through the mounted `data/` directory
 - This is usually faster and more stable on a Mac than running Ollama inside Docker
+- To run the CLI in Docker: `docker compose run --rm --profile cli cli`
 
 ### Helpful Docker commands
 
@@ -198,7 +295,6 @@ docker compose ps
 docker compose logs -f dashboard
 docker compose restart dashboard
 docker compose down
-docker compose up --build -d dashboard
 ```
 
 ## Usage
@@ -289,7 +385,8 @@ The goal is to balance helpfulness with trust.
 - `nomic-embed-text` for local embeddings
 - FAISS for retrieval
 - LangGraph for workflow orchestration when available
-- JSON files for local persistence
+- JSON files + FAISS index for local persistence
+- Local semantic cache + sqlite execution traces
 - Plain HTML/CSS/JS dashboard
 
 ## Best Practices
