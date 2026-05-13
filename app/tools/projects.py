@@ -59,6 +59,25 @@ def add_goal(path: Path, project_name: str, text: str) -> bool:
     return False
 
 
+def delete_project(path: Path, project_name: str) -> bool:
+    pname = project_name.strip()
+    if not pname:
+        return False
+    projects = load_projects(path)
+    kept = [
+        project
+        for project in projects
+        if not (
+            isinstance(project, dict)
+            and str(project.get("name", "")).strip().lower() == pname.lower()
+        )
+    ]
+    if len(kept) == len(projects):
+        return False
+    write_json(path, kept)
+    return True
+
+
 def edit_goal(path: Path, project_name: str, goal_index: int, text: str) -> bool:
     pname = project_name.strip()
     goal_text = text.strip()

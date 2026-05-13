@@ -22,6 +22,12 @@ class Config:
     reminders_path: Path
     conversations_path: Path
     projects_path: Path
+    semantic_cache_path: Path
+    traces_db_path: Path
+    max_retries: int
+    agent_timeout_s: float
+    semantic_cache_threshold: float
+    global_budget_s: float
 
     @staticmethod
     def load() -> "Config":
@@ -52,6 +58,24 @@ class Config:
         reminders_path = data_dir / "reminders.json"
         conversations_path = data_dir / "conversations.json"
         projects_path = data_dir / "projects.json"
+        semantic_cache_path = data_dir / "semantic_cache.json"
+        traces_db_path = data_dir / "execution_traces.sqlite3"
+        try:
+            max_retries = int(os.getenv("NUDGE_MAX_RETRIES", "2"))
+        except ValueError:
+            max_retries = 2
+        try:
+            agent_timeout_s = float(os.getenv("NUDGE_AGENT_TIMEOUT_S", "15"))
+        except ValueError:
+            agent_timeout_s = 15.0
+        try:
+            semantic_cache_threshold = float(os.getenv("NUDGE_SEMANTIC_CACHE_THRESHOLD", "0.75"))
+        except ValueError:
+            semantic_cache_threshold = 0.75
+        try:
+            global_budget_s = float(os.getenv("NUDGE_GLOBAL_BUDGET_S", "25"))
+        except ValueError:
+            global_budget_s = 25.0
 
         return Config(
             model=model,
@@ -69,4 +93,10 @@ class Config:
             reminders_path=reminders_path,
             conversations_path=conversations_path,
             projects_path=projects_path,
+            semantic_cache_path=semantic_cache_path,
+            traces_db_path=traces_db_path,
+            max_retries=max_retries,
+            agent_timeout_s=agent_timeout_s,
+            semantic_cache_threshold=semantic_cache_threshold,
+            global_budget_s=global_budget_s,
         )

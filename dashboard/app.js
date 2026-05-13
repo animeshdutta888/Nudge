@@ -1,34 +1,38 @@
 const summaryCards = document.getElementById("summaryCards");
+const runtimeRibbon = document.getElementById("runtimeRibbon");
+const runtimeSummary = document.getElementById("runtimeSummary");
+const runtimeStatusTag = document.getElementById("runtimeStatusTag");
 const focusChips = document.getElementById("focusChips");
-const interestChips = document.getElementById("interestChips");
-const recentLogs = document.getElementById("recentLogs");
-const recentNotes = document.getElementById("recentNotes");
-const remindersList = document.getElementById("remindersList");
-const trendBars = document.getElementById("trendBars");
-const reviewText = document.getElementById("reviewText");
-const projectsList = document.getElementById("projectsList");
-const timelineList = document.getElementById("timelineList");
-const timelineToggleBtn = document.getElementById("timelineToggleBtn");
-const conversationSearchInput = document.getElementById("conversationSearchInput");
-const memorySearchInput = document.getElementById("memorySearchInput");
-const projectsSearchInput = document.getElementById("projectsSearchInput");
-const timelineSearchInput = document.getElementById("timelineSearchInput");
-const remindersSearchInput = document.getElementById("remindersSearchInput");
 const chatFeed = document.getElementById("chatFeed");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
+const quickPrompts = document.getElementById("quickPrompts");
+const conversationSearchInput = document.getElementById("conversationSearchInput");
+const contextSearchInput = document.getElementById("contextSearchInput");
+const contextTabs = document.getElementById("contextTabs");
+const memoryList = document.getElementById("memoryList");
+const memoryMoreBtn = document.getElementById("memoryMoreBtn");
+const projectsList = document.getElementById("projectsList");
+const projectsMoreBtn = document.getElementById("projectsMoreBtn");
+const remindersList = document.getElementById("remindersList");
+const remindersMoreBtn = document.getElementById("remindersMoreBtn");
+const reviewText = document.getElementById("reviewText");
+const newChatBtn = document.getElementById("newChatBtn");
 const refreshBtn = document.getElementById("refreshBtn");
 const reviewBtn = document.getElementById("reviewBtn");
+const inlineReviewBtn = document.getElementById("inlineReviewBtn");
+const themeToggleBtn = document.getElementById("themeToggleBtn");
 const openProjectModalBtn = document.getElementById("openProjectModalBtn");
 const openProjectPanelBtn = document.getElementById("openProjectPanelBtn");
-const closeProjectModalBtn = document.getElementById("closeProjectModalBtn");
 const projectModal = document.getElementById("projectModal");
+const closeProjectModalBtn = document.getElementById("closeProjectModalBtn");
 const projectForm = document.getElementById("projectForm");
-const projectNameInput = document.getElementById("projectNameInput");
-const projectGoalInput = document.getElementById("projectGoalInput");
 const projectNameField = document.getElementById("projectNameField");
 const projectGoalField = document.getElementById("projectGoalField");
+const projectNameInput = document.getElementById("projectNameInput");
+const projectGoalInput = document.getElementById("projectGoalInput");
 const projectSubmitBtn = document.getElementById("projectSubmitBtn");
+const projectModalTitle = document.getElementById("projectModalTitle");
 const projectModalMessage = document.getElementById("projectModalMessage");
 const dailyCheckinModal = document.getElementById("dailyCheckinModal");
 const dailyCheckinForm = document.getElementById("dailyCheckinForm");
@@ -39,323 +43,343 @@ const dailyLaterBtn = document.getElementById("dailyLaterBtn");
 const dailySkipBtn = document.getElementById("dailySkipBtn");
 const dailySubmitBtn = document.getElementById("dailySubmitBtn");
 const dailyCheckinMessage = document.getElementById("dailyCheckinMessage");
-const MAX_VISIBLE_CHATS = 15;
-const MAX_VISIBLE_TIMELINE = 6;
 
-let visibleChats = [];
-let projectModalState = { mode: "add-project", project: "", goalIndex: 0 };
-let timelineExpanded = false;
-let timelineItems = [];
-let pendingActionActive = false;
-let pendingActionSubmitting = false;
-let dailyCheckinActive = false;
-const searchState = {
-  conversation: "",
-  memory: "",
-  projects: "",
-  timeline: "",
-  reminders: "",
-};
-
-const summarySpec = [
-  ["logs_total", "Logs"],
-  ["notes_total", "Notes"],
-  ["conversations_total", "Chats"],
-  ["logs_today", "Today"],
-  ["notes_this_week", "7d Notes"],
-  ["open_reminders", "Reminders"],
-  ["projects_total", "Projects"],
+const MAX_VISIBLE_CHATS = 24;
+const PROMPTS = [
+  "What do you know about me?",
+  "What did I learn recently?",
+  "What should I focus on next?",
+  "Summarize my current priorities",
 ];
 
+let overviewCache = null;
+let visibleChats = [];
+let activeContextTab = "memory";
+let pendingActionActive = false;
+let pendingActionSubmitting = false;
+let activeChatStartTs = "";
+let activeChatAnchorCount = 0;
+let contextExpanded = {
+  memory: false,
+  projects: false,
+  reminders: false,
+};
+let projectModalState = { mode: "add-project", project: "", goalIndex: 0 };
+
+function init() {
+  hydrateTheme();
+  renderQuickPrompts();
+  wireEvents();
+  loadOverview();
+}
+
 async function loadOverview() {
-  const res = await fetch("/api/overview");
-  const data = await res.json();
-  renderOverview(data);
+  try {
+    const res = await fetch("/api/overview");
+    if (!res.ok) throw new Error(`Overview request failed (${res.status})`);
+    const data = await res.json();
+    overviewCache = data;
+    renderOverview(data);
+  } catch (error) {
+    renderRuntimeError(`Could not load overview. ${error.message || error}`);
+  }
 }
 
 function renderOverview(data) {
-  renderCards(data.summary || {});
-  renderChips(focusChips, data.focus || [], "No focus captured yet.");
-  renderChips(interestChips, data.interests || [], "No interests learned yet.");
-  if (!searchState.memory) {
-    renderRepairStack(recentLogs, data.recent_logs || [], "log", "No logs yet.");
-    renderRepairStack(recentNotes, data.recent_notes || [], "note", "No notes yet.");
-  }
-  if (!searchState.reminders) {
-    renderStack(remindersList, data.reminders || [], "No open reminders.", (x) => x.text, (x) => x.due_ts || "No due time");
-  }
-  if (!searchState.projects) {
-    renderProjects(data.projects || []);
-  }
-  timelineItems = Array.isArray(data.timeline) ? data.timeline : [];
-  if (!searchState.timeline) {
-    renderTimeline(timelineItems);
-  }
-  renderTrend(data.activity_by_day || []);
+  renderSummary(data.summary || {});
+  renderRuntime(data.runtime || {});
+  renderFocus(data.focus || []);
+  visibleChats = sortChatsChronologically((data.recent_conversations || []).slice(0, MAX_VISIBLE_CHATS).map(cleanChatItem));
+  renderChat(filterConversation(visibleChats, conversationSearchInput.value.trim()));
+  renderCurrentContext(data);
   pendingActionActive = Boolean(data.pending_action);
-  if (!searchState.conversation) {
-    visibleChats = (data.recent_conversations || []).slice(0, MAX_VISIBLE_CHATS);
-    renderChat(visibleChats);
-  }
   syncDailyCheckin(data.daily_checkin || {});
 }
 
-function renderCards(summary) {
-  summaryCards.innerHTML = "";
-  summarySpec.forEach(([key, label]) => {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `<span class="value">${summary[key] ?? 0}</span><span class="label">${label}</span>`;
-    summaryCards.appendChild(card);
-  });
+function renderSummary(summary) {
+  const items = [
+    ["Chats", summary.conversations_total ?? 0],
+    ["Memories", (summary.logs_total ?? 0) + (summary.notes_total ?? 0)],
+    ["Reminders", summary.open_reminders ?? 0],
+    ["Projects", summary.projects_total ?? 0],
+  ];
+  summaryCards.innerHTML = items
+    .map(
+      ([label, value]) => `
+        <div class="summary-card">
+          <span class="value">${escapeHtml(String(value))}</span>
+          <span class="label">${escapeHtml(label)}</span>
+        </div>
+      `
+    )
+    .join("");
 }
 
-function renderChips(root, items, emptyText) {
-  root.innerHTML = "";
+function renderRuntime(runtime) {
+  const status = String(runtime.status || "IDLE").toUpperCase();
+  const degraded = Boolean(runtime.degraded_mode);
+  runtimeStatusTag.textContent = degraded ? `${status} / DEGRADED` : status;
+  runtimeRibbon.innerHTML = [
+    runtime.mode || "LOCAL-FIRST",
+    runtime.network || "DISCONNECTED",
+    degraded ? "FALLBACK ACTIVE" : "HEALTHY",
+  ]
+    .map((item) => `<span class="pill">${escapeHtml(item)}</span>`)
+    .join("");
+
+  runtimeSummary.innerHTML = `
+    <div><strong>Latest query</strong><br />${escapeHtml(runtime.query || "No recent run yet.")}</div>
+    <div><strong>Source</strong><br />${escapeHtml(runtime.source || "dashboard")}</div>
+    <div><strong>Retrieved</strong><br />${escapeHtml(String(runtime.retrieved_chunks ?? 0))} items</div>
+    <div><strong>Memory used</strong><br />${escapeHtml(String(runtime.memory_records ?? 0))} items</div>
+  `;
+}
+
+function renderFocus(items) {
+  focusChips.innerHTML = "";
   if (!items.length) {
-    root.innerHTML = `<div class="stack-item">${emptyText}</div>`;
+    focusChips.innerHTML = `<div class="info-card-body">No current focus saved yet.</div>`;
     return;
   }
   items.forEach((item) => {
-    const el = document.createElement("span");
-    el.className = "chip";
-    el.textContent = item;
-    root.appendChild(el);
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = item;
+    focusChips.appendChild(chip);
   });
 }
 
-function renderStack(root, items, emptyText, bodyFn, metaFn) {
-  root.innerHTML = "";
-  if (!items.length) {
-    root.innerHTML = `<div class="stack-item">${emptyText}</div>`;
-    return;
-  }
-  items.forEach((item) => {
-    const el = document.createElement("div");
-    el.className = "stack-item";
-    el.innerHTML = `<div>${escapeHtml(bodyFn(item) || "")}</div><small>${escapeHtml(metaFn(item) || "")}</small>`;
-    root.appendChild(el);
-  });
-}
-
-function renderTimeline(items) {
-  const visible = timelineExpanded ? items : items.slice(0, MAX_VISIBLE_TIMELINE);
-  renderStack(timelineList, visible, "No timeline yet.", (x) => `[${x.kind}] ${x.text}`, (x) => x.ts);
-
-  if (searchState.timeline) {
-    timelineToggleBtn.classList.add("hidden");
-    timelineToggleBtn.textContent = "Show More";
-    return;
-  }
-
-  if (!items.length || items.length <= MAX_VISIBLE_TIMELINE) {
-    timelineToggleBtn.classList.add("hidden");
-    timelineToggleBtn.textContent = "Show More";
-    return;
-  }
-
-  timelineToggleBtn.classList.remove("hidden");
-  timelineToggleBtn.textContent = timelineExpanded ? "Show Less" : `Show More (${items.length - MAX_VISIBLE_TIMELINE})`;
-}
-
-function renderRepairStack(root, items, kind, emptyText) {
-  root.innerHTML = "";
-  if (!items.length) {
-    root.innerHTML = `<div class="stack-item">${emptyText}</div>`;
-    return;
-  }
-  items.forEach((item) => {
-    const pinned = item.pinned ? " pinned" : "";
-    const pinLabel = item.pinned ? "Unpin" : "Pin";
-    const el = document.createElement("div");
-    el.className = `stack-item${pinned}`;
-    el.innerHTML = `
-      <div>${escapeHtml(item.text || "")}</div>
-      <small>${escapeHtml(item.ts || "")} · ${kind} ${item.recent_index}</small>
-      <div class="row-actions">
-        <button class="ghost mini" data-action="edit" data-kind="${kind}" data-index="${item.recent_index}">Edit</button>
-        <button class="ghost mini" data-action="${item.pinned ? "unpin" : "pin"}" data-kind="${kind}" data-index="${item.recent_index}">${pinLabel}</button>
-        <button class="ghost mini danger" data-action="delete" data-kind="${kind}" data-index="${item.recent_index}">Delete</button>
-      </div>
-    `;
-    root.appendChild(el);
-  });
-}
-
-function renderProjects(items) {
-  projectsList.innerHTML = "";
-  if (!items.length) {
-    projectsList.innerHTML = `<div class="stack-item">No projects yet.</div>`;
-    return;
-  }
-  items.forEach((project) => {
-    const goals = Array.isArray(project.goals) ? project.goals : [];
-    const projectName = project.name || "";
-    const status = project.status || "active";
-    const goalsHtml = goals.length
-      ? goals
-          .map(
-            (goal, index) => `
-              <div class="goal-row">
-                <div class="goal-line${goal.done ? " done" : ""}">${escapeHtml(goal.text || "")}</div>
-                <div class="row-actions compact">
-                  ${
-                    goal.done
-                      ? `<button class="ghost mini" data-project-action="reopen_goal" data-project="${escapeAttr(projectName)}" data-goal-index="${
-                          index + 1
-                        }">Reopen</button>`
-                      : `<button class="ghost mini" data-project-action="done_goal" data-project="${escapeAttr(projectName)}" data-goal-index="${
-                          index + 1
-                        }">Done</button>`
-                  }
-                  <button class="ghost mini" data-project-action="open_edit_goal" data-project="${escapeAttr(projectName)}" data-goal-index="${
-                    index + 1
-                  }" data-goal-text="${escapeAttr(goal.text || "")}">Edit</button>
-                  <button class="ghost mini danger" data-project-action="delete_goal" data-project="${escapeAttr(projectName)}" data-goal-index="${
-                    index + 1
-                  }">Delete</button>
-                </div>
-              </div>
-            `
-          )
-          .join("")
-      : `<div class="goal-line">No goals yet.</div>`;
-    const projectActions = [];
-    projectActions.push(`<button class="ghost mini" data-project-action="open_add_goal" data-project="${escapeAttr(projectName)}">Add Goal</button>`);
-    if (status === "active") {
-      projectActions.push(`<button class="ghost mini" data-project-action="complete_project" data-project="${escapeAttr(projectName)}">Done</button>`);
-      projectActions.push(`<button class="ghost mini" data-project-action="archive_project" data-project="${escapeAttr(projectName)}">Archive</button>`);
-    } else if (status === "archived") {
-      projectActions.push(`<button class="ghost mini" data-project-action="activate_project" data-project="${escapeAttr(projectName)}">Reopen</button>`);
-      projectActions.push(`<button class="ghost mini" data-project-action="complete_project" data-project="${escapeAttr(projectName)}">Mark Done</button>`);
-    } else {
-      projectActions.push(`<button class="ghost mini" data-project-action="activate_project" data-project="${escapeAttr(projectName)}">Move Active</button>`);
-      projectActions.push(`<button class="ghost mini" data-project-action="archive_project" data-project="${escapeAttr(projectName)}">Archive</button>`);
-    }
-    const el = document.createElement("div");
-    el.className = "stack-item";
-    el.innerHTML = `
-      <div class="project-head">
-        <strong>${escapeHtml(projectName)}</strong>
-        <span class="project-status status-${escapeHtml(status)}">${escapeHtml(status)}</span>
-      </div>
-      <div class="row-actions project-actions">${projectActions.join("")}</div>
-      <div class="goal-list">${goalsHtml}</div>
-    `;
-    projectsList.appendChild(el);
-  });
-}
-
-function renderTrend(items) {
-  trendBars.innerHTML = "";
-  if (!items.length) {
-    trendBars.innerHTML = `<div class="stack-item">No trend data yet.</div>`;
-    return;
-  }
-  const max = Math.max(...items.map((x) => x.count), 1);
-  items.forEach((item) => {
-    const wrap = document.createElement("div");
-    wrap.className = "bar-wrap";
-    const h = Math.max(14, Math.round((item.count / max) * 140));
-    wrap.innerHTML = `
-      <div class="bar-value">${item.count}</div>
-      <div class="bar" style="height:${h}px"></div>
-      <div class="bar-label">${item.day.slice(5)}</div>
-    `;
-    trendBars.appendChild(wrap);
-  });
+function renderQuickPrompts() {
+  quickPrompts.innerHTML = PROMPTS.map(
+    (prompt) => `<button class="ghost mini quick-prompt" type="button" data-prompt="${escapeAttr(prompt)}">${escapeHtml(prompt)}</button>`
+  ).join("");
 }
 
 function renderChat(items) {
-  const previousTop = chatFeed.scrollTop;
-  chatFeed.innerHTML = "";
+  const shouldStick = chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight < 100;
   if (!items.length) {
-    chatFeed.innerHTML = `<div class="stack-item">No conversation history yet.</div>`;
+    chatFeed.innerHTML = `<div class="empty-state">No matching conversation yet.</div>`;
     return;
   }
-  items.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "chat-row";
-    const assistantClass = item.pending ? "bubble assistant thinking" : "bubble assistant";
-    const actionBar = item.pendingAction && item.isLatest
-      ? `
-        <div class="chat-actions">
-          <button class="ghost mini icon-btn" data-pending-action="approve" title="Approve"${pendingActionSubmitting ? " disabled" : ""}>👍</button>
-          <button class="ghost mini icon-btn" data-pending-action="skip" title="Skip"${pendingActionSubmitting ? " disabled" : ""}>👎</button>
+  chatFeed.innerHTML = items
+    .map((item, index) => {
+      const actionBar = item.pendingAction && index === 0
+        ? `
+          <div class="chat-actions">
+            <button class="ghost mini" data-pending-action="approve" type="button"${pendingActionSubmitting ? " disabled" : ""}>Approve</button>
+            <button class="ghost mini" data-pending-action="skip" type="button"${pendingActionSubmitting ? " disabled" : ""}>Skip</button>
+          </div>
+        `
+        : "";
+      return `
+        <div class="chat-row">
+          <div class="chat-meta user">You</div>
+          <div class="bubble user">${escapeHtml(item.user || "")}</div>
+          <div class="chat-meta">${escapeHtml(item.source || "nudge")}</div>
+          <div class="bubble assistant${item.pending ? " thinking" : ""}">${escapeHtml(item.assistant || "")}</div>
+          ${actionBar}
+        </div>
+      `;
+    })
+    .join("");
+  if (shouldStick) {
+    chatFeed.scrollTop = chatFeed.scrollHeight;
+  }
+}
+
+function renderCurrentContext(data) {
+  if (activeContextTab === "memory") {
+    renderMemoryPanel(data.recent_logs || [], data.recent_notes || []);
+    return;
+  }
+  if (activeContextTab === "projects") {
+    renderProjects(data.projects || []);
+    return;
+  }
+  if (activeContextTab === "reminders") {
+    renderReminders(data.reminders || []);
+    return;
+  }
+  renderReviewPanel();
+}
+
+function renderMemoryPanel(logs, notes) {
+  const mergedAll = [
+    ...logs.map((item) => ({ ...item, kind: "log" })),
+    ...notes.map((item) => ({ ...item, kind: "note" })),
+  ]
+    .sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+
+  const merged = contextExpanded.memory ? mergedAll : mergedAll.slice(0, 5);
+
+  if (!mergedAll.length) {
+    memoryList.innerHTML = `<div class="empty-state">No saved notes or logs yet.</div>`;
+    memoryMoreBtn.classList.add("hidden");
+    return;
+  }
+
+  memoryList.innerHTML = merged
+    .map(
+      (item) => `
+        <div class="info-card">
+          <div class="info-card-head">
+            <div>
+              <p class="info-card-title">${escapeHtml(item.kind === "note" ? "Note" : "Log")}</p>
+              <div class="info-card-meta">${escapeHtml(item.ts || "")}</div>
+            </div>
+            <button class="ghost mini danger" type="button" data-action="delete" data-kind="${escapeAttr(item.kind)}" data-index="${escapeAttr(String(item.recent_index || 0))}">Remove</button>
+          </div>
+          <p class="info-card-body">${escapeHtml(item.text || "")}</p>
         </div>
       `
-      : "";
-    row.innerHTML = `
-      <div class="bubble user">${escapeHtml(item.user || "")}</div>
-      <div class="${assistantClass}">${escapeHtml(item.assistant || "")}</div>
-      ${actionBar}
-    `;
-    chatFeed.appendChild(row);
-  });
-  chatFeed.scrollTop = previousTop;
+    )
+    .join("");
+  memoryMoreBtn.classList.toggle("hidden", mergedAll.length <= 5);
+  memoryMoreBtn.textContent = contextExpanded.memory ? "Show Less" : "See More";
+}
+
+function renderProjects(items) {
+  const allItems = items || [];
+  const visibleItems = contextExpanded.projects ? allItems : allItems.slice(0, 5);
+  if (!allItems.length) {
+    projectsList.innerHTML = `<div class="empty-state">No active projects yet.</div>`;
+    projectsMoreBtn.classList.add("hidden");
+    return;
+  }
+
+  projectsList.innerHTML = visibleItems
+    .map((project) => {
+      const goals = Array.isArray(project.goals) ? project.goals.slice(0, 3) : [];
+      const goalLines = goals.length
+        ? goals
+            .map(
+              (goal, index) => `
+                <div class="info-card-meta">${goal.done ? "Done" : "Open"} · ${escapeHtml(goal.text || "")}
+                  <button class="ghost mini" type="button" data-project-action="${goal.done ? "reopen_goal" : "done_goal"}" data-project="${escapeAttr(project.name || "")}" data-goal-index="${index + 1}">${goal.done ? "Reopen" : "Done"}</button>
+                </div>
+              `
+            )
+            .join("")
+        : `<div class="info-card-meta">No goals yet.</div>`;
+
+      return `
+        <div class="info-card">
+          <div class="info-card-head">
+            <div>
+              <p class="info-card-title">${escapeHtml(project.name || "")}</p>
+              <div class="info-card-meta">${escapeHtml(project.status || "active")}</div>
+            </div>
+            <button class="ghost mini danger" type="button" data-project-action="delete_project" data-project="${escapeAttr(project.name || "")}">Remove</button>
+          </div>
+          <div class="card-actions">
+            <button class="ghost mini" type="button" data-project-action="open_add_goal" data-project="${escapeAttr(project.name || "")}">Add Goal</button>
+            <button class="ghost mini" type="button" data-project-action="archive_project" data-project="${escapeAttr(project.name || "")}">Archive</button>
+          </div>
+          <div class="card-stack">${goalLines}</div>
+        </div>
+      `;
+    })
+    .join("");
+  projectsMoreBtn.classList.toggle("hidden", allItems.length <= 5);
+  projectsMoreBtn.textContent = contextExpanded.projects ? "Show Less" : "See More";
+}
+
+function renderReminders(items) {
+  const allItems = items || [];
+  const visibleItems = contextExpanded.reminders ? allItems : allItems.slice(0, 5);
+  if (!allItems.length) {
+    remindersList.innerHTML = `<div class="empty-state">No reminders due soon.</div>`;
+    remindersMoreBtn.classList.add("hidden");
+    return;
+  }
+  remindersList.innerHTML = visibleItems
+    .map(
+      (item) => `
+        <div class="info-card">
+          <div class="info-card-head">
+            <div>
+              <p class="info-card-title">${escapeHtml(item.text || "")}</p>
+              <div class="info-card-meta">${escapeHtml(item.due_ts || "No due time")}</div>
+            </div>
+          </div>
+        </div>
+      `
+    )
+    .join("");
+  remindersMoreBtn.classList.toggle("hidden", allItems.length <= 5);
+  remindersMoreBtn.textContent = contextExpanded.reminders ? "Show Less" : "See More";
+}
+
+async function renderReviewPanel(forceRefresh = false) {
+  if (!forceRefresh && reviewText.dataset.loaded === "true") {
+    return;
+  }
+  reviewText.textContent = "Generating review...";
+  try {
+    const res = await fetch("/api/review-week");
+    if (!res.ok) throw new Error(`Review request failed (${res.status})`);
+    const data = await res.json();
+    reviewText.textContent = data.review || "Review unavailable.";
+    reviewText.dataset.loaded = "true";
+  } catch (error) {
+    reviewText.textContent = `Review failed.\n${error.message || error}`;
+  }
 }
 
 async function sendChat(text) {
-  const pending = { user: text, assistant: "Nudge is thinking...", source: "dashboard", pending: true };
-  visibleChats = [pending, ...visibleChats].slice(0, MAX_VISIBLE_CHATS);
-  renderChat(visibleChats);
+  const pending = cleanChatItem({ user: text, assistant: "Nudge is thinking...", source: "nudge", pending: true });
+  const baseChats = filterConversation(visibleChats, "");
+  visibleChats = [...baseChats, pending].slice(-MAX_VISIBLE_CHATS);
+  renderChat(filterConversation(visibleChats, conversationSearchInput.value.trim()));
 
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  const data = await res.json();
-  visibleChats = (data.overview?.recent_conversations || []).slice(0, MAX_VISIBLE_CHATS);
-  visibleChats = visibleChats.map((item, index) => ({
-    ...item,
-    isLatest: index === 0,
-    pendingAction: index === 0 ? Boolean(data.pending_action) : false,
-  }));
-  if (visibleChats.length) {
-    visibleChats[0].assistant = data.reply_display || data.reply || visibleChats[0].assistant;
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error(`Chat request failed (${res.status})`);
+    const data = await res.json();
+    overviewCache = data.overview || overviewCache;
+    visibleChats = sortChatsChronologically(
+      ((data.overview && data.overview.recent_conversations) || []).slice(0, MAX_VISIBLE_CHATS).map(cleanChatItem)
+    );
+    if (visibleChats.length) {
+      visibleChats[visibleChats.length - 1].pendingAction = Boolean(data.pending_action);
+    }
+    renderOverview({ ...(overviewCache || {}), recent_conversations: visibleChats });
+  } catch (error) {
+    visibleChats[visibleChats.length - 1] = cleanChatItem({
+      user: text,
+      assistant: `Nudge hit an error while responding.\n${error.message || error}`,
+      source: "nudge",
+    });
+    renderChat(filterConversation(visibleChats, conversationSearchInput.value.trim()));
+    renderRuntimeError(`Chat failed. ${error.message || error}`);
   }
-  renderOverview({
-    ...(data.overview || {}),
-    recent_conversations: visibleChats,
-    graph_enabled: data.graph_enabled,
-  });
 }
 
 async function handlePendingAction(action) {
-  if (pendingActionSubmitting || !pendingActionActive) {
-    return;
-  }
+  if (pendingActionSubmitting || !pendingActionActive) return;
   pendingActionSubmitting = true;
-  if (visibleChats.length) {
-    visibleChats[0] = {
-      ...visibleChats[0],
-      assistant: action === "approve" ? "Saving..." : "Skipping...",
-      pendingAction: false,
-      isLatest: true,
-    };
-    renderChat(visibleChats);
+  try {
+    const res = await fetch("/api/pending-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    if (!res.ok) throw new Error(`Pending action failed (${res.status})`);
+    const data = await res.json();
+    overviewCache = data.overview || overviewCache;
+    visibleChats = sortChatsChronologically(
+      ((data.overview && data.overview.recent_conversations) || []).slice(0, MAX_VISIBLE_CHATS).map(cleanChatItem)
+    );
+    renderOverview({ ...(overviewCache || {}), recent_conversations: visibleChats });
+  } catch (error) {
+    renderRuntimeError(`Could not complete pending action. ${error.message || error}`);
+  } finally {
+    pendingActionSubmitting = false;
   }
-  const res = await fetch("/api/pending-save", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
-  });
-  const data = await res.json();
-  if (visibleChats.length) {
-    visibleChats[0] = {
-      ...visibleChats[0],
-      assistant: data.reply_display || data.reply || "",
-      pendingAction: false,
-      isLatest: true,
-    };
-  }
-  pendingActionSubmitting = false;
-  renderOverview({
-    ...(data.overview || {}),
-    recent_conversations: visibleChats,
-    graph_enabled: data.graph_enabled,
-  });
 }
 
 async function repairItem(action, kind, recentIndex, text = "") {
@@ -365,7 +389,8 @@ async function repairItem(action, kind, recentIndex, text = "") {
     body: JSON.stringify({ action, kind, recent_index: recentIndex, text }),
   });
   const data = await res.json();
-  renderOverview(data.overview || {});
+  overviewCache = data.overview || overviewCache;
+  renderOverview(overviewCache || {});
 }
 
 async function mutateProject(action, payload) {
@@ -375,17 +400,35 @@ async function mutateProject(action, payload) {
     body: JSON.stringify({ action, ...payload }),
   });
   const data = await res.json();
-  renderOverview(data.overview || {});
+  overviewCache = data.overview || overviewCache;
+  renderOverview(overviewCache || {});
   return data;
 }
 
-async function searchCard(card, query) {
+async function searchCurrentContext() {
+  const query = contextSearchInput.value.trim();
+  if (!query) {
+    renderCurrentContext(overviewCache || {});
+    return;
+  }
+
+  const card = activeContextTab === "review" ? "memory" : activeContextTab;
   const res = await fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ card, query }),
   });
-  return await res.json();
+  const data = await res.json();
+
+  if (activeContextTab === "memory") {
+    renderMemoryPanel(data.recent_logs || [], data.recent_notes || []);
+    return;
+  }
+  if (activeContextTab === "projects") {
+    renderProjects(data.projects || []);
+    return;
+  }
+  renderReminders(data.reminders || []);
 }
 
 async function submitDailyCheckin(action, payload = {}) {
@@ -397,212 +440,181 @@ async function submitDailyCheckin(action, payload = {}) {
   return await res.json();
 }
 
-async function loadReview() {
-  reviewText.textContent = "Generating weekly review...";
-  const res = await fetch("/api/review-week");
-  const data = await res.json();
-  reviewText.textContent = data.review || "Review unavailable.";
+function cleanChatItem(item) {
+  return {
+    ...item,
+    assistant: normalizeAssistantText(item.assistant || ""),
+    pendingAction: Boolean(item.pendingAction),
+  };
 }
 
-chatForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const text = chatInput.value.trim();
-  if (!text) return;
-  chatInput.value = "";
-  await sendChat(text);
-});
-
-refreshBtn.addEventListener("click", loadOverview);
-reviewBtn.addEventListener("click", loadReview);
-timelineToggleBtn.addEventListener("click", () => {
-  timelineExpanded = !timelineExpanded;
-  renderTimeline(timelineItems);
-});
-openProjectModalBtn.addEventListener("click", () => openProjectModal("add-project"));
-openProjectPanelBtn.addEventListener("click", () => openProjectModal("add-project"));
-closeProjectModalBtn.addEventListener("click", closeProjectModal);
-dailyLaterBtn.addEventListener("click", closeDailyCheckinModal);
-dailySkipBtn.addEventListener("click", async () => {
-  await submitDailyCheckin("dismiss");
-  closeDailyCheckinModal();
-  await loadOverview();
-});
-
-projectForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  setProjectModalMessage("");
-  const name = projectNameInput.value.trim();
-  const goal = projectGoalInput.value.trim();
-  if (projectModalState.mode === "add-project") {
-    if (!name) {
-      setProjectModalMessage("Please enter a project name.");
-      return;
-    }
-    const result = await mutateProject("add_project", { name });
-    if (!result.ok) {
-      setProjectModalMessage(result.message || "Could not create project.");
-      return;
-    }
-    if (goal) {
-      const goalResult = await mutateProject("add_goal", { project: name, text: goal });
-      if (!goalResult.ok) {
-        setProjectModalMessage(goalResult.message || "Project created, but the first goal could not be added.");
-        return;
-      }
-    }
-    closeProjectModal();
-    return;
-  }
-
-  if (!projectModalState.project) {
-    setProjectModalMessage("Project details are missing.");
-    return;
-  }
-  if (!goal) {
-    setProjectModalMessage("Please enter a goal.");
-    return;
-  }
-  if (projectModalState.mode === "add-goal") {
-    const result = await mutateProject("add_goal", { project: projectModalState.project, text: goal });
-    if (!result.ok) {
-      setProjectModalMessage(result.message || "Could not add goal.");
-      return;
-    }
-    closeProjectModal();
-    return;
-  }
-  if (projectModalState.mode === "edit-goal") {
-    const result = await mutateProject("edit_goal", {
-      project: projectModalState.project,
-      goal_index: projectModalState.goalIndex,
-      text: goal,
-    });
-    if (!result.ok) {
-      setProjectModalMessage(result.message || "Could not update goal.");
-      return;
-    }
-    closeProjectModal();
-  }
-});
-
-dailyCheckinForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  setDailyCheckinMessage("");
-  setDailyCheckinSubmitting(true);
-  const data = await submitDailyCheckin("submit", {
-    energy: dailyEnergyInput.value.trim(),
-    focus: dailyFocusInput.value.trim(),
-    win: dailyWinInput.value.trim(),
+function filterConversation(items, query) {
+  const filteredBySession = applyChatSessionFilter(items);
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return filteredBySession;
+  return filteredBySession.filter((item) => {
+    const hay = `${item.user || ""} ${item.assistant || ""} ${item.source || ""}`.toLowerCase();
+    return hay.includes(q);
   });
-  setDailyCheckinSubmitting(false);
-  if (!data.ok) {
-    setDailyCheckinMessage("Could not save your check-in just now.");
+}
+
+function applyChatSessionFilter(items) {
+  if (!activeChatStartTs && !activeChatAnchorCount) return items;
+  return items.filter((item, index) => {
+    if (item.pending) return true;
+    if (activeChatStartTs && item.ts && String(item.ts) > activeChatStartTs) return true;
+    return index >= activeChatAnchorCount;
+  });
+}
+
+function sortChatsChronologically(items) {
+  return [...items].sort((a, b) => {
+    if (a.pending && !b.pending) return 1;
+    if (!a.pending && b.pending) return -1;
+    return String(a.ts || "").localeCompare(String(b.ts || ""));
+  });
+}
+
+function switchContextTab(tab) {
+  activeContextTab = tab;
+  document.querySelectorAll(".tab-btn").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tab);
+  });
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `${tab}Panel`);
+  });
+  contextSearchInput.value = "";
+  if (tab in contextExpanded) {
+    contextExpanded[tab] = false;
+  }
+  renderCurrentContext(overviewCache || {});
+  if (tab === "review") {
+    renderReviewPanel();
+  }
+}
+
+function hydrateTheme() {
+  const theme = window.localStorage.getItem("nudge-theme") || "light";
+  document.body.dataset.theme = theme;
+  themeToggleBtn.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
+}
+
+function toggleTheme() {
+  const next = document.body.dataset.theme === "dark" ? "light" : "dark";
+  document.body.dataset.theme = next;
+  window.localStorage.setItem("nudge-theme", next);
+  themeToggleBtn.textContent = next === "dark" ? "Light Mode" : "Dark Mode";
+}
+
+function syncDailyCheckin(dailyCheckin) {
+  const shouldPrompt = Boolean(dailyCheckin.should_prompt);
+  dailyCheckinModal.classList.toggle("hidden", !shouldPrompt);
+  dailyCheckinModal.setAttribute("aria-hidden", shouldPrompt ? "false" : "true");
+}
+
+function closeDailyCheckinModal() {
+  dailyCheckinModal.classList.add("hidden");
+  dailyCheckinModal.setAttribute("aria-hidden", "true");
+}
+
+function openProjectModal(mode, options = {}) {
+  projectModalState = {
+    mode,
+    project: options.project || "",
+    goalIndex: options.goalIndex || 0,
+  };
+  setProjectModalMessage("");
+  projectModal.classList.remove("hidden");
+  projectModal.setAttribute("aria-hidden", "false");
+
+  if (mode === "add-project") {
+    projectModalTitle.textContent = "Add Project";
+    projectNameField.classList.remove("hidden");
+    projectGoalField.classList.remove("hidden");
+    projectNameInput.readOnly = false;
+    projectNameInput.value = "";
+    projectGoalInput.value = "";
+    projectSubmitBtn.textContent = "Create Project";
+    projectNameInput.focus();
     return;
   }
-  closeDailyCheckinModal();
-  renderOverview(data.overview || {});
-});
 
-document.addEventListener("click", async (event) => {
-  if (event.target.closest("[data-close-modal='true']")) {
-    closeProjectModal();
-    return;
-  }
-  if (event.target.closest("[data-close-checkin='dismiss']")) {
-    closeDailyCheckinModal();
+  if (mode === "add-goal") {
+    projectModalTitle.textContent = `Add Goal to ${options.project || ""}`;
+    projectNameField.classList.add("hidden");
+    projectGoalField.classList.remove("hidden");
+    projectGoalInput.value = "";
+    projectSubmitBtn.textContent = "Add Goal";
+    projectGoalInput.focus();
     return;
   }
 
-  const btn = event.target.closest("button[data-action]");
-  if (btn) {
-    const action = btn.dataset.action;
-    const kind = btn.dataset.kind;
-    const recentIndex = Number(btn.dataset.index || 0);
-    if (!action || !kind || !recentIndex) return;
+  projectModalTitle.textContent = `Edit Goal in ${options.project || ""}`;
+  projectNameField.classList.add("hidden");
+  projectGoalField.classList.remove("hidden");
+  projectGoalInput.value = options.goalText || "";
+  projectSubmitBtn.textContent = "Save Goal";
+  projectGoalInput.focus();
+}
 
-    if (action === "edit") {
-      const text = window.prompt(`Edit ${kind} ${recentIndex}`);
-      if (!text || !text.trim()) return;
-      await repairItem("edit", kind, recentIndex, text.trim());
-      return;
+function closeProjectModal() {
+  projectModal.classList.add("hidden");
+  projectModal.setAttribute("aria-hidden", "true");
+}
+
+function setProjectModalMessage(message) {
+  if (!message) {
+    projectModalMessage.textContent = "";
+    projectModalMessage.classList.add("hidden");
+    return;
+  }
+  projectModalMessage.textContent = message;
+  projectModalMessage.classList.remove("hidden");
+}
+
+function setDailyCheckinMessage(message) {
+  if (!message) {
+    dailyCheckinMessage.textContent = "";
+    dailyCheckinMessage.classList.add("hidden");
+    return;
+  }
+  dailyCheckinMessage.textContent = message;
+  dailyCheckinMessage.classList.remove("hidden");
+}
+
+function setDailyCheckinSubmitting(isSubmitting) {
+  dailySubmitBtn.disabled = isSubmitting;
+  dailyLaterBtn.disabled = isSubmitting;
+  dailySkipBtn.disabled = isSubmitting;
+}
+
+function renderRuntimeError(message) {
+  runtimeStatusTag.textContent = "ERROR";
+  runtimeRibbon.innerHTML = `<span class="pill">${escapeHtml("attention needed")}</span>`;
+  runtimeSummary.innerHTML = `<div>${escapeHtml(message)}</div>`;
+}
+
+function normalizeAssistantText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.startsWith("```")) {
+    const lines = text.split("\n");
+    if (lines.length >= 3 && lines[lines.length - 1].trim() === "```") {
+      return normalizeAssistantText(lines.slice(1, -1).join("\n"));
     }
-
-    await repairItem(action, kind, recentIndex);
-    return;
   }
-
-  const projectBtn = event.target.closest("button[data-project-action]");
-  const pendingBtn = event.target.closest("button[data-pending-action]");
-  if (pendingBtn) {
-    pendingBtn.disabled = true;
-    await handlePendingAction(pendingBtn.dataset.pendingAction || "");
-    return;
-  }
-  if (!projectBtn) return;
-  const projectAction = projectBtn.dataset.projectAction;
-  const project = projectBtn.dataset.project;
-  const goalIndex = Number(projectBtn.dataset.goalIndex || 0);
-  const goalText = projectBtn.dataset.goalText || "";
-
-  if (projectAction === "open_add_goal" && project) {
-    openProjectModal("add-goal", { project });
-    return;
-  }
-  if (projectAction === "open_edit_goal" && project && goalIndex) {
-    openProjectModal("edit-goal", { project, goalIndex, goalText });
-    return;
-  }
-  if (projectAction === "delete_goal" && project && goalIndex) {
-    if (window.confirm("Delete this goal?")) {
-      await mutateProject("delete_goal", { project, goal_index: goalIndex });
+  if (text.startsWith("{") && text.endsWith("}") && text.includes('"answer"')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && typeof parsed.answer === "string") {
+        return parsed.answer.trim() || text;
+      }
+    } catch (error) {
+      return text;
     }
-    return;
   }
-  if ((projectAction === "done_goal" || projectAction === "reopen_goal") && project && goalIndex) {
-    await mutateProject(projectAction, { project, goal_index: goalIndex });
-    return;
-  }
-  if (
-    (projectAction === "archive_project" || projectAction === "complete_project" || projectAction === "activate_project") &&
-    project
-  ) {
-    await mutateProject(projectAction, { project });
-  }
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !projectModal.classList.contains("hidden")) {
-    closeProjectModal();
-    return;
-  }
-  if (event.key === "Escape" && !dailyCheckinModal.classList.contains("hidden")) {
-    closeDailyCheckinModal();
-  }
-});
-
-wireSearch(conversationSearchInput, "conversation", async (data) => {
-  visibleChats = (data.recent_conversations || []).slice(0, 40);
-  renderChat(visibleChats);
-});
-
-wireSearch(memorySearchInput, "memory", async (data) => {
-  renderRepairStack(recentLogs, data.recent_logs || [], "log", "No matching logs.");
-  renderRepairStack(recentNotes, data.recent_notes || [], "note", "No matching notes.");
-});
-
-wireSearch(projectsSearchInput, "projects", async (data) => {
-  renderProjects(data.projects || []);
-});
-
-wireSearch(timelineSearchInput, "timeline", async (data) => {
-  timelineExpanded = true;
-  timelineItems = Array.isArray(data.timeline) ? data.timeline : [];
-  renderTimeline(timelineItems);
-});
-
-wireSearch(remindersSearchInput, "reminders", async (data) => {
-  renderStack(remindersList, data.reminders || [], "No matching reminders.", (x) => x.text, (x) => x.due_ts || "No due time");
-});
+  return text;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -615,133 +627,220 @@ function escapeAttr(value) {
   return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
-function openProjectModal(mode, options = {}) {
-  projectModalState = {
-    mode,
-    project: options.project || "",
-    goalIndex: options.goalIndex || 0,
-  };
-  setProjectModalMessage("");
-  projectModal.classList.remove("hidden");
-  projectModal.setAttribute("aria-hidden", "false");
-  projectNameField.classList.remove("hidden");
-  projectGoalField.classList.remove("hidden");
+function wireEvents() {
+  refreshBtn.addEventListener("click", loadOverview);
+  reviewBtn.addEventListener("click", () => {
+    switchContextTab("review");
+    renderReviewPanel(true);
+  });
+  newChatBtn.addEventListener("click", () => {
+    const last = visibleChats.length ? visibleChats[visibleChats.length - 1] : null;
+    activeChatStartTs = last && last.ts ? String(last.ts) : "";
+    activeChatAnchorCount = visibleChats.length;
+    conversationSearchInput.value = "";
+    visibleChats = [];
+    renderChat([]);
+    chatInput.value = "";
+    chatInput.focus();
+  });
+  inlineReviewBtn.addEventListener("click", () => renderReviewPanel(true));
+  themeToggleBtn.addEventListener("click", toggleTheme);
+  openProjectModalBtn.addEventListener("click", () => openProjectModal("add-project"));
+  openProjectPanelBtn.addEventListener("click", () => {
+    switchContextTab("projects");
+    openProjectModal("add-project");
+  });
+  closeProjectModalBtn.addEventListener("click", closeProjectModal);
 
-  const eyebrow = document.querySelector(".modal-eyebrow");
-  const title = document.querySelector(".modal-head h2");
-  if (mode === "add-project") {
-    eyebrow.textContent = "Project Setup";
-    title.textContent = "Add A Project";
-    projectNameInput.readOnly = false;
-    projectNameInput.value = "";
-    projectGoalInput.value = "";
-    projectGoalInput.placeholder = "Play badminton twice this week";
-    projectSubmitBtn.textContent = "Create Project";
-    projectNameInput.focus();
-    return;
-  }
+  quickPrompts.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-prompt]");
+    if (!button) return;
+    chatInput.value = button.dataset.prompt || "";
+    chatInput.focus();
+  });
 
-  projectNameInput.readOnly = true;
-  projectNameInput.value = options.project || "";
+  chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    chatInput.value = "";
+    await sendChat(text);
+  });
 
-  if (mode === "add-goal") {
-    eyebrow.textContent = "Project Goal";
-    title.textContent = "Add Goal";
-    projectGoalInput.value = "";
-    projectGoalInput.placeholder = "What do you want to achieve next?";
-    projectSubmitBtn.textContent = "Add Goal";
-    projectGoalInput.focus();
-    return;
-  }
+  conversationSearchInput.addEventListener("input", () => {
+    renderChat(filterConversation(visibleChats, conversationSearchInput.value.trim()));
+  });
 
-  eyebrow.textContent = "Goal Update";
-  title.textContent = "Edit Goal";
-  projectGoalInput.value = options.goalText || "";
-  projectGoalInput.placeholder = "Refine this goal";
-  projectSubmitBtn.textContent = "Save Goal";
-  projectGoalInput.focus();
-  projectGoalInput.select();
-}
+  contextSearchInput.addEventListener("input", debounce(searchCurrentContext, 220));
 
-function setProjectModalMessage(text) {
-  if (!text) {
-    projectModalMessage.textContent = "";
-    projectModalMessage.classList.add("hidden");
-    return;
-  }
-  projectModalMessage.textContent = text;
-  projectModalMessage.classList.remove("hidden");
-}
+  contextTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-tab]");
+    if (!button) return;
+    switchContextTab(button.dataset.tab);
+  });
 
-function wireSearch(input, card, applyResults) {
-  let requestId = 0;
-  input.addEventListener("input", async () => {
-    const query = input.value.trim();
-    searchState[card] = query;
-    requestId += 1;
-    const currentRequest = requestId;
-    if (!query) {
-      await loadOverview();
+  memoryMoreBtn.addEventListener("click", () => {
+    contextExpanded.memory = !contextExpanded.memory;
+    renderCurrentContext(overviewCache || {});
+  });
+  projectsMoreBtn.addEventListener("click", () => {
+    contextExpanded.projects = !contextExpanded.projects;
+    renderCurrentContext(overviewCache || {});
+  });
+  remindersMoreBtn.addEventListener("click", () => {
+    contextExpanded.reminders = !contextExpanded.reminders;
+    renderCurrentContext(overviewCache || {});
+  });
+
+  projectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setProjectModalMessage("");
+
+    if (projectModalState.mode === "add-project") {
+      const name = projectNameInput.value.trim();
+      const goal = projectGoalInput.value.trim();
+      if (!name) {
+        setProjectModalMessage("Please enter a project name.");
+        return;
+      }
+      const result = await mutateProject("add_project", { name });
+      if (!result.ok) {
+        setProjectModalMessage(result.message || "Could not create project.");
+        return;
+      }
+      if (goal) {
+        await mutateProject("add_goal", { project: name, text: goal });
+      }
+      closeProjectModal();
+      switchContextTab("projects");
       return;
     }
-    const data = await searchCard(card, query);
-    if (currentRequest !== requestId) {
+
+    const goalText = projectGoalInput.value.trim();
+    if (!goalText) {
+      setProjectModalMessage("Please enter a goal.");
       return;
     }
-    await applyResults(data);
+
+    if (projectModalState.mode === "add-goal") {
+      const result = await mutateProject("add_goal", { project: projectModalState.project, text: goalText });
+      if (!result.ok) {
+        setProjectModalMessage(result.message || "Could not add goal.");
+        return;
+      }
+      closeProjectModal();
+      return;
+    }
+
+    const result = await mutateProject("edit_goal", {
+      project: projectModalState.project,
+      goal_index: projectModalState.goalIndex,
+      text: goalText,
+    });
+    if (!result.ok) {
+      setProjectModalMessage(result.message || "Could not update goal.");
+      return;
+    }
+    closeProjectModal();
+  });
+
+  dailyCheckinForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setDailyCheckinMessage("");
+    setDailyCheckinSubmitting(true);
+    const data = await submitDailyCheckin("submit", {
+      energy: dailyEnergyInput.value.trim(),
+      focus: dailyFocusInput.value.trim(),
+      win: dailyWinInput.value.trim(),
+    });
+    setDailyCheckinSubmitting(false);
+    if (!data.ok) {
+      setDailyCheckinMessage("Could not save your check-in right now.");
+      return;
+    }
+    closeDailyCheckinModal();
+    overviewCache = data.overview || overviewCache;
+    renderOverview(overviewCache || {});
+  });
+
+  dailyLaterBtn.addEventListener("click", closeDailyCheckinModal);
+  dailySkipBtn.addEventListener("click", async () => {
+    await submitDailyCheckin("dismiss");
+    closeDailyCheckinModal();
+    await loadOverview();
+  });
+
+  document.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-close-modal='true']")) {
+      closeProjectModal();
+      return;
+    }
+    if (event.target.closest("[data-close-checkin='dismiss']")) {
+      closeDailyCheckinModal();
+      return;
+    }
+
+    const pendingButton = event.target.closest("[data-pending-action]");
+    if (pendingButton) {
+      await handlePendingAction(pendingButton.dataset.pendingAction || "");
+      return;
+    }
+
+    const memoryButton = event.target.closest("[data-action]");
+    if (memoryButton) {
+      const action = memoryButton.dataset.action || "";
+      const kind = memoryButton.dataset.kind || "";
+      const index = Number(memoryButton.dataset.index || 0);
+      if (action && kind && index) {
+        await repairItem(action, kind, index);
+      }
+      return;
+    }
+
+    const projectButton = event.target.closest("[data-project-action]");
+    if (!projectButton) return;
+    const projectAction = projectButton.dataset.projectAction || "";
+    const project = projectButton.dataset.project || "";
+    const goalIndex = Number(projectButton.dataset.goalIndex || 0);
+    const goalText = projectButton.dataset.goalText || "";
+
+    if (projectAction === "open_add_goal") {
+      openProjectModal("add-goal", { project });
+      return;
+    }
+    if (projectAction === "open_edit_goal") {
+      openProjectModal("edit-goal", { project, goalIndex, goalText });
+      return;
+    }
+    if (projectAction === "delete_project") {
+      if (window.confirm(`Remove project "${project}"?`)) {
+        await mutateProject("delete_project", { project });
+      }
+      return;
+    }
+    if (projectAction === "archive_project") {
+      await mutateProject("archive_project", { project });
+      return;
+    }
+    if (projectAction === "done_goal" || projectAction === "reopen_goal") {
+      await mutateProject(projectAction, { project, goal_index: goalIndex });
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeProjectModal();
+      closeDailyCheckinModal();
+    }
   });
 }
 
-function closeProjectModal() {
-  projectModal.classList.add("hidden");
-  projectModal.setAttribute("aria-hidden", "true");
-  setProjectModalMessage("");
-  projectModalState = { mode: "add-project", project: "", goalIndex: 0 };
-  projectNameInput.readOnly = false;
-  projectForm.reset();
+function debounce(fn, waitMs) {
+  let timeoutId = 0;
+  return (...args) => {
+    window.clearTimeout(timeoutId);
+    timeoutId = window.setTimeout(() => fn(...args), waitMs);
+  };
 }
 
-function syncDailyCheckin(state) {
-  dailyCheckinActive = Boolean(state.should_prompt);
-  if (dailyCheckinActive) {
-    openDailyCheckinModal();
-    return;
-  }
-  closeDailyCheckinModal();
-}
-
-function openDailyCheckinModal() {
-  dailyCheckinModal.classList.remove("hidden");
-  dailyCheckinModal.setAttribute("aria-hidden", "false");
-  dailyEnergyInput.focus();
-}
-
-function closeDailyCheckinModal() {
-  dailyCheckinActive = false;
-  dailyCheckinModal.classList.add("hidden");
-  dailyCheckinModal.setAttribute("aria-hidden", "true");
-  setDailyCheckinMessage("");
-  setDailyCheckinSubmitting(false);
-}
-
-function setDailyCheckinMessage(text) {
-  if (!text) {
-    dailyCheckinMessage.textContent = "";
-    dailyCheckinMessage.classList.add("hidden");
-    return;
-  }
-  dailyCheckinMessage.textContent = text;
-  dailyCheckinMessage.classList.remove("hidden");
-}
-
-function setDailyCheckinSubmitting(isSubmitting) {
-  dailyEnergyInput.disabled = isSubmitting;
-  dailyFocusInput.disabled = isSubmitting;
-  dailyWinInput.disabled = isSubmitting;
-  dailyLaterBtn.disabled = isSubmitting;
-  dailySkipBtn.disabled = isSubmitting;
-  dailySubmitBtn.disabled = isSubmitting;
-  dailySubmitBtn.textContent = isSubmitting ? "Saving..." : "Start Check-in";
-}
-
-loadOverview();
+init();

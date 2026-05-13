@@ -17,12 +17,13 @@ from app.agent.memory import Memory
 from app.persona.builder import build_persona_from_logs
 from app.services.retrieval import Retriever
 from app.services.llm import LlmConfig
-from app.tools.projects import add_goal, add_project, delete_goal, edit_goal, mark_goal, set_project_status
+from app.tools.projects import add_goal, add_project, delete_goal, delete_project, edit_goal, mark_goal, set_project_status
 from app.tools.reminders import list_reminders
 from app.services.storage import ensure_json_file, read_json, write_json
 from app.utils.time import now_local_iso
 from app.tools.repair import delete_recent, edit_recent, pin_recent
 from app.agent.state import StateStore
+from app.utils.presentation import assistant_display_text
 from app.utils.time import today_local_date
 
 
@@ -87,7 +88,7 @@ def main() -> int:
             self._send_json(
                 {
                     "reply": reply,
-                    "reply_display": _strip_pending_save_hint(reply),
+                    "reply_display": assistant_display_text(_strip_pending_save_hint(reply)),
                     "overview": overview,
                     "pending_action": overview.get("pending_action"),
                     "graph_enabled": LANGGRAPH_AVAILABLE,
@@ -172,6 +173,12 @@ def main() -> int:
                     goal_index,
                 )
                 message = "Goal deleted." if ok else "Could not delete goal."
+            elif action == "delete_project":
+                ok = delete_project(
+                    cfg.projects_path,
+                    str(data.get("project", "")).strip(),
+                )
+                message = "Project removed." if ok else "Could not remove project."
             elif action == "done_goal":
                 try:
                     goal_index = int(data.get("goal_index", 0) or 0)
@@ -241,7 +248,7 @@ def main() -> int:
             self._send_json(
                 {
                     "reply": reply,
-                    "reply_display": reply,
+                    "reply_display": assistant_display_text(reply),
                     "overview": overview,
                     "pending_action": overview.get("pending_action"),
                     "graph_enabled": LANGGRAPH_AVAILABLE,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 from app.services.conversations import load_conversations
@@ -9,6 +10,7 @@ from app.services.storage import read_json
 from app.agent.state import StateStore
 from app.tools.projects import load_projects
 from app.tools.repair import recent_items
+from app.utils.presentation import assistant_display_text
 from app.utils.time import parse_iso_to_local_date, today_local_date
 
 
@@ -60,6 +62,7 @@ def build_dashboard_payload(data_dir: Path) -> dict[str, Any]:
             {"day": day, "count": count}
             for day, count in sorted(log_days.items())[-14:]
         ],
+        "runtime": _runtime_state(data_dir),
         "pending_action": _pending_action(data_dir / "state.json"),
         "daily_checkin": daily_checkin,
     }
@@ -204,7 +207,7 @@ def _tokens(text: str) -> list[str]:
 
 def _clean_conversation(item: dict[str, Any]) -> dict[str, Any]:
     cleaned = dict(item)
-    assistant = str(cleaned.get("assistant", ""))
+    assistant = _display_assistant_text(str(cleaned.get("assistant", "")))
     for marker in (
         "\n\n(I noticed something that may be worth remembering.",
         "\n\n(Pending save:",
@@ -218,6 +221,10 @@ def _clean_conversation(item: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _display_assistant_text(text: str) -> str:
+    return assistant_display_text(text)
+
+
 def _pending_action(path: Path) -> dict[str, Any] | None:
     raw = read_json(path, default={})
     if not isinstance(raw, dict):
@@ -229,6 +236,60 @@ def _pending_action(path: Path) -> dict[str, Any] | None:
     if isinstance(pending_save, dict):
         return {"kind": "save", **pending_save}
     return None
+
+
+def _runtime_state(data_dir: Path) -> dict[str, Any]:
+    state_raw = read_json(data_dir / "state.json", default={})
+    runtime_raw = state_raw.get("runtime_status") if isinstance(state_raw, dict) else {}
+    runtime = runtime_raw if isinstance(runtime_raw, dict) else {}
+    latest = {
+        "mode": "LOCAL-FIRST",
+        "network": "DISCONNECTED",
+        "llm": "OLLAMA LOCAL",
+        "status": str(runtime.get("execution_status", "IDLE") or "IDLE"),
+        "degraded_mode": bool(runtime.get("degraded_mode", False)),
+        "run_id": str(runtime.get("run_id", "")).strip(),
+        "query": str(runtime.get("query", "")).strip(),
+        "source": str(runtime.get("source", "")).strip() or "dashboard",
+        "retrieved_chunks": int(runtime.get("retrieved_chunks", 0) or 0),
+        "memory_records": int(runtime.get("memory_records", 0) or 0),
+        "failure_count": int(runtime.get("failure_count", 0) or 0),
+        "governance_reason": "" if runtime.get("governance_reason") in {None, "None"} else str(runtime.get("governance_reason", "")).strip(),
+        "critic_feedback": runtime.get("critic_feedback", []) if isinstance(runtime.get("critic_feedback"), list) else [],
+        "latest_trace": runtime.get("latest_trace") if isinstance(runtime.get("latest_trace"), dict) else None,
+        "trace_events": _recent_trace_events(data_dir / "execution_traces.sqlite3"),
+    }
+    return latest
+
+
+def _recent_trace_events(path: Path, limit: int = 8) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            rows = conn.execute(
+                """
+                SELECT ts, agent, step, status, duration_ms, retry_count, message
+                FROM execution_traces
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [
+        {
+            "ts": str(ts),
+            "agent": str(agent),
+            "step": str(step),
+            "status": str(status),
+            "duration_ms": int(duration_ms or 0),
+            "retry_count": int(retry_count or 0),
+            "message": str(message),
+        }
+        for ts, agent, step, status, duration_ms, retry_count, message in rows
+    ]
 
 
 def _daily_checkin_prompt(data_dir: Path, logs: list[dict[str, Any]]) -> dict[str, Any]:
