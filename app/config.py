@@ -10,6 +10,7 @@ class Config:
     model: str
     ollama_base_url: str
     data_dir: Path
+    workspace_root: Path
     recent_logs_n: int
     timeout_s: float
     embed_model: str
@@ -36,6 +37,8 @@ class Config:
         model = os.getenv("NUDGE_MODEL", "qwen2.5:3b")
         ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         data_dir = Path(os.getenv("NUDGE_DATA_DIR", str(project_root / "data"))).resolve()
+        default_workspace_root = (Path.home() / "Projects") if (Path.home() / "Projects").exists() else project_root
+        workspace_root = Path(os.getenv("NUDGE_WORKSPACE_ROOT", str(default_workspace_root))).resolve()
 
         try:
             recent_logs_n = int(os.getenv("NUDGE_RECENT_LOGS", "20"))
@@ -81,6 +84,7 @@ class Config:
             model=model,
             ollama_base_url=ollama_base_url,
             data_dir=data_dir,
+            workspace_root=workspace_root,
             recent_logs_n=recent_logs_n,
             timeout_s=timeout_s,
             embed_model=embed_model,

@@ -363,7 +363,7 @@ async function handlePendingAction(action) {
   if (pendingActionSubmitting || !pendingActionActive) return;
   pendingActionSubmitting = true;
   try {
-    const res = await fetch("/api/pending-save", {
+    const res = await fetch("/api/pending-action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
@@ -374,6 +374,9 @@ async function handlePendingAction(action) {
     visibleChats = sortChatsChronologically(
       ((data.overview && data.overview.recent_conversations) || []).slice(0, MAX_VISIBLE_CHATS).map(cleanChatItem)
     );
+    if (data.reply_display) {
+      visibleChats = [...visibleChats, cleanChatItem({ user: "Action", assistant: data.reply_display, source: "nudge" })].slice(-MAX_VISIBLE_CHATS);
+    }
     renderOverview({ ...(overviewCache || {}), recent_conversations: visibleChats });
   } catch (error) {
     renderRuntimeError(`Could not complete pending action. ${error.message || error}`);

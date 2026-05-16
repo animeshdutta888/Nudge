@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app.agent.core import pending_save_action, run_agent
+from app.agent.core import pending_action, run_agent
 from app.config import Config
 from app.tools.dashboard_data import build_dashboard_payload, search_dashboard_card
 from app.agent.graph import LANGGRAPH_AVAILABLE
@@ -61,8 +61,8 @@ def main() -> int:
                 if parsed.path == "/api/search":
                     self._handle_search()
                     return
-                if parsed.path == "/api/pending-save":
-                    self._handle_pending_save()
+                if parsed.path in {"/api/pending-save", "/api/pending-action"}:
+                    self._handle_pending_action()
                     return
                 if parsed.path == "/api/daily-checkin":
                     self._handle_daily_checkin()
@@ -231,7 +231,7 @@ def main() -> int:
                 return
             self._send_json(search_dashboard_card(cfg.data_dir, card, query))
 
-        def _handle_pending_save(self) -> None:
+        def _handle_pending_action(self) -> None:
             length = int(self.headers.get("Content-Length", "0") or "0")
             body = self.rfile.read(length) if length > 0 else b"{}"
             try:
@@ -243,7 +243,7 @@ def main() -> int:
             if action not in {"approve", "skip"}:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid action")
                 return
-            reply = pending_save_action(action, cfg=cfg)
+            reply = pending_action(action, cfg=cfg)
             overview = build_dashboard_payload(cfg.data_dir)
             self._send_json(
                 {

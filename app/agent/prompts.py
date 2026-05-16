@@ -219,3 +219,49 @@ PLAN_INTENT = (
     + "\nRecent context:\n{context}\n"
     + "\nUser input:\n{user}\n"
 )
+
+
+ROUTE_INTENT = (
+    SYSTEM
+    + "\n\n"
+    + "Task: Route the user's message into the best local action before general QA.\n"
+    + "Pick the single best intent.\n"
+    + "Use intent='none' when the message should continue to the normal answer pipeline.\n"
+    + "Prefer action routing for reminders, notes/logs, project operations, approvals, and simple list/show commands.\n"
+    + "Do not invent missing fields.\n"
+    + "Return ONLY JSON:\n"
+    + "{{\n"
+    + '  "intent": "none|save_note|save_log|save_candidate|add_reminder|list_reminders|complete_reminder|add_project|add_goal|list_projects|show_project|complete_goal|show_persona|show_priorities|show_insights|notes_create|notes_search|notes_list|filesystem_list|filesystem_read|shell_run|approve|skip",\n'
+    + '  "text": "string",\n'
+    + '  "query": "string",\n'
+    + '  "project": "string",\n'
+    + '  "goal": "string",\n'
+    + '  "goal_index": 0,\n'
+    + '  "reminder_id": 0,\n'
+    + '  "when": "string",\n'
+    + '  "path": "string",\n'
+    + '  "command": "string",\n'
+    + '  "reason": "short string"\n'
+    + "}}\n"
+    + "\nRules:\n"
+    + "- Use `add_reminder` for natural reminder requests like 'remind me to...', 'set a reminder...', or 'remember to... later'.\n"
+    + "- Use `save_note` for durable preferences, identity facts, learnings, goals, or facts the user is clearly asking to store.\n"
+    + "- Use `save_log` for time-bound diary/status updates about today, yesterday, this week, mood, energy, or what happened.\n"
+    + "- Use `save_candidate` when a personal statement looks useful to store but the user did not explicitly ask to save it.\n"
+    + "- Use `add_project` when the user asks to create or start a project.\n"
+    + "- Use `add_goal` when the user asks to add a goal/task under a specific project.\n"
+    + "- Use `show_project` when the user asks what a named project is, how it is going, its status, or to show/open that project.\n"
+    + "- Use `show_priorities` for questions about focus, priorities, what to do next, or what to focus on next.\n"
+    + "- Use `show_persona` only for explicit self-knowledge/persona requests like 'show persona' or 'what do you know about me'.\n"
+    + "- Use `notes_create`, `notes_search`, and `notes_list` for note-taking requests.\n"
+    + "- Use `filesystem_list` to browse directories and `filesystem_read` to open/read a file.\n"
+    + "- Use `shell_run` when the user explicitly asks to run a local command, inspect git status, run tests, or execute a shell action.\n"
+    + "- Use `list_projects`, `list_reminders`, `show_persona`, and `show_insights` for natural-language list/show requests.\n"
+    + "- Use `complete_goal` or `complete_reminder` only when the user clearly asks to mark an existing item done and the target id/index is explicit.\n"
+    + "- Use `approve` or `skip` for confirmation/discard requests for pending actions.\n"
+    + "- For `add_reminder`, put the scheduling fragment in `when` and the reminder body in `text`.\n"
+    + "- For `save_candidate`, `save_note`, and `save_log`, put the clean memory text in `text`.\n"
+    + "\nPersona JSON:\n{persona}\n"
+    + "\nRecent context:\n{context}\n"
+    + "\nUser input:\n{user}\n"
+)

@@ -177,3 +177,57 @@ def projects_summary(path: Path) -> str:
             done_count = sum(1 for g in goals if isinstance(g, dict) and bool(g.get("done", False)))
         lines.append(f"- {name} ({status}) goals: {done_count}/{total}")
     return "\n".join(lines) if lines else "No projects yet."
+
+
+def find_project(path: Path, query: str) -> dict[str, Any] | None:
+    clean = query.strip()
+    if not clean:
+        return None
+    projects = load_projects(path)
+    query_key = _project_key(clean)
+    exact_match: dict[str, Any] | None = None
+    partial_match: dict[str, Any] | None = None
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        name = str(project.get("name", "")).strip()
+        if not name:
+            continue
+        name_key = _project_key(name)
+        if name_key == query_key:
+            exact_match = project
+            break
+        if query_key in name_key or name_key in query_key:
+            partial_match = partial_match or project
+    return exact_match or partial_match
+
+
+def describe_project(path: Path, query: str) -> str:
+    project = find_project(path, query)
+    if not isinstance(project, dict):
+        return "I couldn't find a project with that name."
+    name = str(project.get("name", "")).strip() or "Unnamed project"
+    status = str(project.get("status", "active")).strip() or "active"
+    goals_raw = project.get("goals", [])
+    goals = goals_raw if isinstance(goals_raw, list) else []
+    done_count = sum(1 for goal in goals if isinstance(goal, dict) and bool(goal.get("done", False)))
+    lines = [
+        f"Project: {name}",
+        f"Status: {status}",
+        f"Goals: {done_count}/{len(goals)} done",
+    ]
+    for idx, goal in enumerate(goals[:5], start=1):
+        if not isinstance(goal, dict):
+            continue
+        text = str(goal.get("text", "")).strip()
+        if not text:
+            continue
+        marker = "done" if bool(goal.get("done", False)) else "open"
+        lines.append(f"- {idx}. [{marker}] {text}")
+    if len(lines) == 3:
+        lines.append("- No goals yet.")
+    return "\n".join(lines)
+
+
+def _project_key(text: str) -> str:
+    return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in text).split())

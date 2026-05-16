@@ -23,6 +23,14 @@ class PendingPlan:
     reason: str
 
 
+@dataclass(frozen=True)
+class PendingToolAction:
+    tool: str
+    action: str
+    payload: dict[str, Any]
+    reason: str
+
+
 class StateStore:
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -31,6 +39,7 @@ class StateStore:
             {
                 "pending_save": None,
                 "pending_plan": None,
+                "pending_tool_action": None,
                 "autosave_enabled": True,
                 "asked_questions": [],
                 "last_question": None,
@@ -45,6 +54,7 @@ class StateStore:
         return {
             "pending_save": None,
             "pending_plan": None,
+            "pending_tool_action": None,
             "autosave_enabled": True,
             "asked_questions": [],
             "last_question": None,
@@ -138,6 +148,8 @@ class StateStore:
             state["asked_questions"] = []
         if "last_question" not in state:
             state["last_question"] = None
+        if "pending_tool_action" not in state:
+            state["pending_tool_action"] = None
         write_json(self._path, state)
 
     def get_pending_plan(self) -> PendingPlan | None:
@@ -161,6 +173,38 @@ class StateStore:
         state["pending_plan"] = None if pending is None else pending.__dict__
         if "pending_save" not in state:
             state["pending_save"] = None
+        if "autosave_enabled" not in state:
+            state["autosave_enabled"] = True
+        if "asked_questions" not in state:
+            state["asked_questions"] = []
+        if "last_question" not in state:
+            state["last_question"] = None
+        if "pending_tool_action" not in state:
+            state["pending_tool_action"] = None
+        write_json(self._path, state)
+
+    def get_pending_tool_action(self) -> PendingToolAction | None:
+        state = read_json(self._path, default=self._default_state())
+        raw = state.get("pending_tool_action") if isinstance(state, dict) else None
+        if not isinstance(raw, dict):
+            return None
+        tool = str(raw.get("tool", "")).strip()
+        action = str(raw.get("action", "")).strip()
+        payload = raw.get("payload", {})
+        reason = str(raw.get("reason", "")).strip()
+        if not tool or not action or not isinstance(payload, dict):
+            return None
+        return PendingToolAction(tool=tool, action=action, payload=payload, reason=reason)
+
+    def set_pending_tool_action(self, pending: PendingToolAction | None) -> None:
+        state = read_json(self._path, default=self._default_state())
+        if not isinstance(state, dict):
+            state = self._default_state()
+        state["pending_tool_action"] = None if pending is None else pending.__dict__
+        if "pending_save" not in state:
+            state["pending_save"] = None
+        if "pending_plan" not in state:
+            state["pending_plan"] = None
         if "autosave_enabled" not in state:
             state["autosave_enabled"] = True
         if "asked_questions" not in state:

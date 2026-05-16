@@ -235,6 +235,9 @@ def _pending_action(path: Path) -> dict[str, Any] | None:
     pending_save = raw.get("pending_save")
     if isinstance(pending_save, dict):
         return {"kind": "save", **pending_save}
+    pending_tool_action = raw.get("pending_tool_action")
+    if isinstance(pending_tool_action, dict):
+        return {"kind": "tool", **pending_tool_action}
     return None
 
 

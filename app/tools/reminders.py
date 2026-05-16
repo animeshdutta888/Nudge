@@ -101,14 +101,14 @@ def parse_remind_command(raw: str) -> tuple[str | None, str]:
 
     now = datetime.now().astimezone()
 
-    m = re.match(r"^(\\d{4}-\\d{2}-\\d{2})(?:\\s+(\\d{1,2}:\\d{2}))?\\s+(.+)$", s)
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s+(.+)$", s)
     if m:
         date_s, time_s, msg = m.group(1), m.group(2), m.group(3)
         hh, mm = (9, 0) if not time_s else (int(time_s.split(":")[0]), int(time_s.split(":")[1]))
         dt = datetime.fromisoformat(date_s).replace(hour=hh, minute=mm, second=0, microsecond=0, tzinfo=now.tzinfo)
         return dt.isoformat(timespec="seconds"), msg.strip()
 
-    m = re.match(r"^(today|tomorrow)(?:\\s+(\\d{1,2}:\\d{2}))?\\s+(.+)$", s, flags=re.IGNORECASE)
+    m = re.match(r"^(today|tomorrow)(?:\s+(\d{1,2}:\d{2}))?\s+(.+)$", s, flags=re.IGNORECASE)
     if m:
         day_s, time_s, msg = m.group(1).lower(), m.group(2), m.group(3)
         base = now.date() if day_s == "today" else (now + timedelta(days=1)).date()
@@ -116,7 +116,7 @@ def parse_remind_command(raw: str) -> tuple[str | None, str]:
         dt = datetime(base.year, base.month, base.day, hh, mm, tzinfo=now.tzinfo)
         return dt.isoformat(timespec="seconds"), msg.strip()
 
-    m = re.match(r"^in\\s+(\\d+)\\s+(days?|hours?|minutes?)\\s+(.+)$", s, flags=re.IGNORECASE)
+    m = re.match(r"^in\s+(\d+)\s+(days?|hours?|minutes?)\s+(.+)$", s, flags=re.IGNORECASE)
     if m:
         n = int(m.group(1))
         unit = m.group(2).lower()
@@ -143,4 +143,3 @@ def _safe_parse_dt(ts: str) -> datetime | None:
 def _load_list(path: Path) -> list[dict[str, Any]]:
     data = read_json(path, default=[])
     return data if isinstance(data, list) else []
-

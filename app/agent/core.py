@@ -21,11 +21,15 @@ def run_agent(user_text: str, cfg: Config | None = None, source: str = "cli") ->
     return runtime.run_sync(user_text, source=source)
 
 
-def pending_save_action(action: str, cfg: Config | None = None) -> str:
+def pending_action(action: str, cfg: Config | None = None) -> str:
     runtime = _get_runtime(cfg or Config.load())
     if action not in {"approve", "skip"}:
         return runtime.run_sync(action, source="dashboard")
     return asyncio.run(runtime.pending_action(action))
+
+
+def pending_save_action(action: str, cfg: Config | None = None) -> str:
+    return pending_action(action, cfg=cfg)
 
 
 _RUNTIMES: dict[str, NudgeRuntime] = {}

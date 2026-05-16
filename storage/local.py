@@ -38,6 +38,7 @@ class LocalWorkspace:
             {
                 "pending_save": None,
                 "pending_plan": None,
+                "pending_tool_action": None,
                 "autosave_enabled": True,
                 "asked_questions": [],
                 "last_question": None,

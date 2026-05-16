@@ -10,12 +10,13 @@ __pycache__/
 .env
 .venv/
 venv/
-
+.nudge
 # Tooling caches
 .pytest_cache/
 .mypy_cache/
 
 # Local app data and indexes
+data/
 data/conversations.json
 data/embeddings.json
 data/faiss.index
