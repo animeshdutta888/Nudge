@@ -252,6 +252,9 @@ export NUDGE_EMBED_MODEL="nomic-embed-text"
 # Local data directory (JSON/FAISS/sqlite traces live here)
 export NUDGE_DATA_DIR="./data"
 
+# Workspace root for local tools (filesystem + shell). Paths are restricted to this root.
+export NUDGE_WORKSPACE_ROOT="$HOME/Projects"
+
 # Dashboard
 export NUDGE_DASHBOARD_HOST="127.0.0.1"
 export NUDGE_DASHBOARD_PORT="8765"
@@ -319,13 +322,27 @@ recent                      Show recent memory entries
 timeline                    Show a recent cross-memory timeline
 story week                  Show a short weekly narrative
 activities                  Recommend activities from persona
-approve                     Approve a pending save or plan
-skip                        Skip a pending save or plan
+approve                     Approve a pending save/plan/tool action
+skip                        Skip a pending save/plan/tool action
 autosave on|off|status      Control autosave behavior
 persona                     Print persona JSON
 help                        Show command help
 quit                        Exit
 ```
+
+### Local tools (notes, filesystem, shell)
+
+Nudge supports a small local tool layer that works from both the CLI and the dashboard chat:
+
+- Notes:
+  - "create a note: <text>"
+  - "list notes"
+  - "search notes for <query>"
+- Filesystem (scoped to `NUDGE_WORKSPACE_ROOT`):
+  - "list files in <path>"
+  - "open/read <path>"
+- Shell (approval-gated):
+  - `run <command>` proposes a command; use `approve` to execute or `skip` to cancel
 
 ### Example session
 
