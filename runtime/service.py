@@ -19,7 +19,7 @@ from app.services.retrieval import Retriever
 from app.services.semantic_cache import SemanticCache
 from app.tools.local_tools import LocalToolExecutor, ToolError, extract_remind_text, normalize_shell_command
 from app.tools.projects import add_goal, add_project, describe_project, find_project, load_projects, mark_goal, projects_summary
-from app.tools.reminders import add_reminder, list_reminders, mark_done, parse_remind_command
+from app.tools.reminders import add_reminder, list_reminders, mark_done, resolve_reminder_request
 from app.utils.presentation import assistant_display_text
 from observability.logger import ExecutionLogger
 from orchestration.engine import OrchestrationEngine
@@ -115,25 +115,25 @@ class NudgeRuntime:
 
         smalltalk_response = await self._handle_smalltalk(text, source)
         if smalltalk_response is not None:
-            await self._workspace.append_conversation(text, smalltalk_response.text, source)
+            await self._workspace.append_conversation(text, smalltalk_response.text, source, smalltalk_response.tool_result)
             self._persist_runtime_state(smalltalk_response)
             return smalltalk_response
 
         command_response = await self._handle_command(text, source)
         if command_response is not None:
-            await self._workspace.append_conversation(text, command_response.text, source)
+            await self._workspace.append_conversation(text, command_response.text, source, command_response.tool_result)
             self._persist_runtime_state(command_response)
             return command_response
 
         routed_response = await self._handle_routed_intent(text, source)
         if routed_response is not None:
-            await self._workspace.append_conversation(text, routed_response.text, source)
+            await self._workspace.append_conversation(text, routed_response.text, source, routed_response.tool_result)
             self._persist_runtime_state(routed_response)
             return routed_response
 
         recall_response = await self._handle_recall(text, source)
         if recall_response is not None:
-            await self._workspace.append_conversation(text, recall_response.text, source)
+            await self._workspace.append_conversation(text, recall_response.text, source, recall_response.tool_result)
             self._persist_runtime_state(recall_response)
             return recall_response
 
@@ -145,7 +145,7 @@ class NudgeRuntime:
             if errors:
                 answer = answer + "\n\nValidation notes: " + "; ".join(errors[:2])
         state.synthesis_output = answer
-        await self._workspace.append_conversation(text, answer, source)
+        await self._workspace.append_conversation(text, answer, source, None)
         response = RuntimeResponse(text=answer, run_id=state.run_id, degraded=state.degraded_mode, state=state)
         self._persist_runtime_state(response)
         return response
@@ -187,7 +187,13 @@ class NudgeRuntime:
         return None
 
     async def pending_action(self, action: str) -> str:
+        response = await self.pending_action_response(action, persist=False)
+        return response.text
+
+    async def pending_action_response(self, action: str, source: str = "dashboard", persist: bool = False) -> RuntimeResponse:
         state = self._workspace.load_state()
+        response_text = "Unsupported action."
+        tool_result: dict[str, object] | None = None
         if action == "approve":
             pending_plan = state.get("pending_plan")
             if isinstance(pending_plan, dict):
@@ -195,14 +201,22 @@ class NudgeRuntime:
                 goals = pending_plan.get("goals", [])
                 created = add_project(self._workspace.projects_path, project)
                 if not created and not any(str(item.get("name", "")).strip().lower() == project.lower() for item in load_projects(self._workspace.projects_path)):
-                    return "I couldn't create that project."
+                    response_text = "I couldn't create that project."
+                    runtime_state = self._new_state("approve", source)
+                    runtime_state.execution_status = "REJECTED"
+                    return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
                 added = 0
                 for goal in goals if isinstance(goals, list) else []:
                     if add_goal(self._workspace.projects_path, project, str(goal)):
                         added += 1
                 state["pending_plan"] = None
                 self._workspace.save_state(state)
-                return f"Saved plan to project `{project}` with {added} goal" + ("" if added == 1 else "s") + "."
+                response_text = f"Saved plan to project `{project}` with {added} goal" + ("" if added == 1 else "s") + "."
+                runtime_state = self._new_state("approve", source)
+                runtime_state.execution_status = "COMPLETED"
+                if persist:
+                    await self._workspace.append_conversation("approve", response_text, source, None)
+                return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
             pending_save = state.get("pending_save")
             if isinstance(pending_save, dict):
                 kind = str(pending_save.get("kind", "note"))
@@ -211,7 +225,12 @@ class NudgeRuntime:
                 self._workspace.refresh_persona_snapshot()
                 state["pending_save"] = None
                 self._workspace.save_state(state)
-                return f"Saved as {kind}."
+                response_text = f"Saved as {kind}."
+                runtime_state = self._new_state("approve", source)
+                runtime_state.execution_status = "COMPLETED"
+                if persist:
+                    await self._workspace.append_conversation("approve", response_text, source, None)
+                return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
             pending_tool_action = state.get("pending_tool_action")
             if isinstance(pending_tool_action, dict):
                 tool = str(pending_tool_action.get("tool", "")).strip()
@@ -219,30 +238,64 @@ class NudgeRuntime:
                 payload = pending_tool_action.get("payload", {})
                 if tool and action_name and isinstance(payload, dict):
                     try:
-                        result = self._tools.execute(tool, action_name, payload)
+                        execution = self._tools.execute(tool, action_name, payload)
                     except ToolError as exc:
                         state["pending_tool_action"] = None
                         self._workspace.save_state(state)
-                        return str(exc)
+                        response_text = str(exc)
+                        runtime_state = self._new_state("approve", source)
+                        runtime_state.execution_status = "REJECTED"
+                        if persist:
+                            await self._workspace.append_conversation("approve", response_text, source, None)
+                        return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
                     state["pending_tool_action"] = None
                     self._workspace.save_state(state)
-                    return result
-            return "Nothing pending."
+                    response_text = execution.text
+                    tool_result = execution.result
+                    runtime_state = self._new_state("approve", source)
+                    runtime_state.execution_status = "COMPLETED"
+                    if persist:
+                        await self._workspace.append_conversation("approve", response_text, source, tool_result)
+                    return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, tool_result=tool_result, state=runtime_state)
+            response_text = "Nothing pending."
+            runtime_state = self._new_state("approve", source)
+            runtime_state.execution_status = "COMPLETED"
+            return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
         if action == "skip":
             if state.get("pending_plan") is not None:
                 state["pending_plan"] = None
                 self._workspace.save_state(state)
-                return "Skipped plan."
+                response_text = "Skipped plan."
+                runtime_state = self._new_state("skip", source)
+                runtime_state.execution_status = "COMPLETED"
+                if persist:
+                    await self._workspace.append_conversation("skip", response_text, source, None)
+                return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
             if state.get("pending_save") is not None:
                 state["pending_save"] = None
                 self._workspace.save_state(state)
-                return "Skipped saving."
+                response_text = "Skipped saving."
+                runtime_state = self._new_state("skip", source)
+                runtime_state.execution_status = "COMPLETED"
+                if persist:
+                    await self._workspace.append_conversation("skip", response_text, source, None)
+                return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
             if state.get("pending_tool_action") is not None:
                 state["pending_tool_action"] = None
                 self._workspace.save_state(state)
-                return "Skipped tool action."
-            return "Nothing pending."
-        return "Unsupported action."
+                response_text = "Skipped tool action."
+                runtime_state = self._new_state("skip", source)
+                runtime_state.execution_status = "COMPLETED"
+                if persist:
+                    await self._workspace.append_conversation("skip", response_text, source, None)
+                return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
+            response_text = "Nothing pending."
+            runtime_state = self._new_state("skip", source)
+            runtime_state.execution_status = "COMPLETED"
+            return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
+        runtime_state = self._new_state(action, source)
+        runtime_state.execution_status = "REJECTED"
+        return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
 
     async def _handle_command(self, text: str, source: str) -> Optional[RuntimeResponse]:
         low = text.lower()
@@ -272,11 +325,14 @@ class NudgeRuntime:
                 requires_approval=True,
             )
         if low.startswith("remind:"):
-            due, body = parse_remind_command(text.split(":", 1)[1].strip())
-            if not body:
-                return RuntimeResponse(text="Usage: `remind: <when> <text>`", run_id=state.run_id, state=state)
-            add_reminder(self._workspace.reminders_path, body, due)
+            resolution = resolve_reminder_request(text.split(":", 1)[1].strip())
+            if resolution.error:
+                state.execution_status = "REJECTED"
+                return RuntimeResponse(text=resolution.error, run_id=state.run_id, state=state)
+            reminder = add_reminder(self._workspace.reminders_path, resolution.text, resolution.due_ts)
             state.execution_status = "COMPLETED"
+            if reminder.due_ts:
+                return RuntimeResponse(text=f"Saved reminder for {reminder.due_ts}.", run_id=state.run_id, state=state)
             return RuntimeResponse(text="Saved reminder.", run_id=state.run_id, state=state)
         if low in {"reminders", "show reminders"}:
             items = list_reminders(self._workspace.reminders_path, upcoming_days=30)
@@ -396,11 +452,14 @@ class NudgeRuntime:
                 state=state,
             )
         if route.intent == "add_reminder":
-            due, body = _resolve_reminder_route(route)
-            if not body:
-                return RuntimeResponse(text="Tell me what you want to be reminded about.", run_id=state.run_id, state=state)
-            add_reminder(self._workspace.reminders_path, body, due)
+            resolution = resolve_reminder_request(text, when_hint=route.when, text_hint=route.text)
+            if resolution.error:
+                state.execution_status = "REJECTED"
+                return RuntimeResponse(text=resolution.error, run_id=state.run_id, state=state)
+            reminder = add_reminder(self._workspace.reminders_path, resolution.text, resolution.due_ts)
             state.execution_status = "COMPLETED"
+            if reminder.due_ts:
+                return RuntimeResponse(text=f"Saved reminder for {reminder.due_ts}.", run_id=state.run_id, state=state)
             return RuntimeResponse(text="Saved reminder.", run_id=state.run_id, state=state)
         if route.intent == "list_reminders":
             items = list_reminders(self._workspace.reminders_path, upcoming_days=30)
@@ -443,9 +502,21 @@ class NudgeRuntime:
         if route.intent == "notes_list":
             return self._run_tool_action(state, "notes", "list", {}, route.reason)
         if route.intent == "filesystem_list":
-            return self._run_tool_action(state, "filesystem", "list", {"path": route.path or route.text}, route.reason)
+            return self._run_tool_action(
+                state,
+                "filesystem",
+                "list",
+                {"path": route.path or route.text, "base_path": self._last_filesystem_base_path()},
+                route.reason,
+            )
         if route.intent == "filesystem_read":
-            return self._run_tool_action(state, "filesystem", "read", {"path": route.path or route.text}, route.reason)
+            return self._run_tool_action(
+                state,
+                "filesystem",
+                "read",
+                {"path": route.path or route.text, "base_path": self._last_filesystem_base_path()},
+                route.reason,
+            )
         if route.intent == "shell_run":
             command = normalize_shell_command(route.command or route.text or text)
             return self._run_tool_action(state, "shell", "run", {"command": command, "timeout_s": 20}, route.reason, requires_approval=True)
@@ -495,12 +566,28 @@ class NudgeRuntime:
                 state=state,
             )
         try:
-            result = self._tools.execute(tool, action, clean_payload)
+            execution = self._tools.execute(tool, action, clean_payload)
         except ToolError as exc:
             state.execution_status = "REJECTED"
             return RuntimeResponse(text=str(exc), run_id=state.run_id, state=state)
+        self._remember_tool_context(execution.result)
         state.execution_status = "COMPLETED"
-        return RuntimeResponse(text=result, run_id=state.run_id, state=state)
+        return RuntimeResponse(text=execution.text, run_id=state.run_id, tool_result=execution.result, state=state)
+
+    def _last_filesystem_base_path(self) -> str:
+        state = self._workspace.load_state()
+        raw = state.get("last_filesystem_path")
+        return str(raw).strip() if raw is not None else ""
+
+    def _remember_tool_context(self, tool_result: dict[str, Any] | None) -> None:
+        if not isinstance(tool_result, dict):
+            return
+        if str(tool_result.get("kind", "")).strip() not in {"filesystem_list", "filesystem_read"}:
+            return
+        path = str(tool_result.get("path", "")).strip()
+        if not path:
+            return
+        self._workspace.merge_state({"last_filesystem_path": path})
 
     async def _handle_recall(self, text: str, source: str) -> Optional[RuntimeResponse]:
         low = text.lower()
@@ -573,14 +660,6 @@ class _InflightEntry:
 
 def _normalize_query(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
-
-
-def _resolve_reminder_route(route) -> tuple[str | None, str]:
-    when = route.when.strip()
-    text = route.text.strip()
-    if when and text:
-        return parse_remind_command(f"{when} {text}")
-    return parse_remind_command(text)
 
 
 def _candidate_kind(text: str) -> str:

@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app.agent.core import pending_action, run_agent
+from app.agent.core import pending_action_result, run_agent
 from app.config import Config
 from app.tools.dashboard_data import build_dashboard_payload, search_dashboard_card
 from app.agent.graph import LANGGRAPH_AVAILABLE
@@ -18,7 +18,7 @@ from app.persona.builder import build_persona_from_logs
 from app.services.retrieval import Retriever
 from app.services.llm import LlmConfig
 from app.tools.projects import add_goal, add_project, delete_goal, delete_project, edit_goal, mark_goal, set_project_status
-from app.tools.reminders import list_reminders
+from app.tools.reminders import list_reminders, mark_done, snooze_reminder
 from app.services.storage import ensure_json_file, read_json, write_json
 from app.utils.time import now_local_iso
 from app.tools.repair import delete_recent, edit_recent, pin_recent
@@ -66,6 +66,9 @@ def main() -> int:
                     return
                 if parsed.path == "/api/daily-checkin":
                     self._handle_daily_checkin()
+                    return
+                if parsed.path == "/api/reminders":
+                    self._handle_reminders()
                     return
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -243,12 +246,13 @@ def main() -> int:
             if action not in {"approve", "skip"}:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid action")
                 return
-            reply = pending_action(action, cfg=cfg)
+            response = pending_action_result(action, cfg=cfg)
             overview = build_dashboard_payload(cfg.data_dir)
             self._send_json(
                 {
-                    "reply": reply,
-                    "reply_display": assistant_display_text(reply),
+                    "reply": response.text,
+                    "reply_display": assistant_display_text(response.text),
+                    "tool_result": response.tool_result,
                     "overview": overview,
                     "pending_action": overview.get("pending_action"),
                     "graph_enabled": LANGGRAPH_AVAILABLE,
@@ -289,6 +293,42 @@ def main() -> int:
                     "overview": overview,
                 }
             )
+
+        def _handle_reminders(self) -> None:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                data = json.loads(body.decode("utf-8"))
+            except json.JSONDecodeError:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid JSON")
+                return
+
+            action = str(data.get("action", "")).strip().lower()
+            try:
+                reminder_id = int(data.get("reminder_id", 0) or 0)
+            except ValueError:
+                reminder_id = 0
+            if reminder_id < 1:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid reminder")
+                return
+
+            ok = False
+            message = ""
+            if action == "done":
+                ok = mark_done(cfg.reminders_path, reminder_id)
+                message = "Reminder completed." if ok else "Could not update reminder."
+            elif action == "snooze":
+                try:
+                    minutes = int(data.get("minutes", 1) or 1)
+                except ValueError:
+                    minutes = 1
+                ok = snooze_reminder(cfg.reminders_path, reminder_id, minutes=minutes)
+                message = f"Reminder snoozed for {minutes} minutes." if ok else "Could not snooze reminder."
+            else:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid action")
+                return
+
+            self._send_json({"ok": ok, "message": message, "overview": build_dashboard_payload(cfg.data_dir)})
 
         def _serve_asset(self, raw_path: str) -> None:
             rel = "index.html" if raw_path in {"", "/"} else raw_path.lstrip("/")

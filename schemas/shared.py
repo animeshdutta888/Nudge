@@ -87,4 +87,5 @@ class RuntimeResponse(BaseModel):
     run_id: str
     degraded: bool = False
     pending_action: Optional[Union[PendingSave, PendingPlan]] = None
+    tool_result: Optional[dict[str, Any]] = None
     state: SharedState

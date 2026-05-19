@@ -50,6 +50,7 @@ Nudge is built to stay on your machine.
 - `checkin` asks a short daily reflection
 - `review week` summarizes recent patterns, wins, and reminders
 - `ask` helps Nudge learn more about you with persona-building questions
+- reminder execution is local-first: the planner/router picks `add_reminder`, then a local parser/tool resolves the final due time before saving
 
 ### Projects and Goals
 - Create projects and attach goals
@@ -62,6 +63,8 @@ Nudge is built to stay on your machine.
 - Local web UI for chat and analytics
 - Search inside conversation, memory, timeline, projects, and reminders
 - Project modal and goal controls
+- Due reminder popups with snooze/done actions
+- Optional browser desktop notifications for due reminders
 - Timeline view and recent activity
 - Shared state with the CLI
 
@@ -145,7 +148,7 @@ Nudge stores a local semantic cache keyed by (query + model ids + local data ver
 
 Nudge supports explicit saves (`note: ...`, `log: ...`) and approval-gated actions:
 - `approve` / `skip` finalizes or discards pending saves/plans
-- Dashboard exposes the same flow via UI actions
+- Dashboard exposes the same flow via UI actions, reminder popups, and local tool approvals
 
 ### Observability and degraded mode
 

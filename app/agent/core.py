@@ -28,6 +28,11 @@ def pending_action(action: str, cfg: Config | None = None) -> str:
     return asyncio.run(runtime.pending_action(action))
 
 
+def pending_action_result(action: str, cfg: Config | None = None):
+    runtime = _get_runtime(cfg or Config.load())
+    return asyncio.run(runtime.pending_action_response(action, source="dashboard", persist=True))
+
+
 def pending_save_action(action: str, cfg: Config | None = None) -> str:
     return pending_action(action, cfg=cfg)
 

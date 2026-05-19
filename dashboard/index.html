@@ -208,6 +208,33 @@
       </div>
     </div>
 
+    <div id="reminderModal" class="modal-shell hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-reminder="dismiss"></div>
+      <div class="modal-card reminder-card">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow soft">Reminder</p>
+            <h2 id="reminderModalTitle">Due now</h2>
+          </div>
+          <button id="closeReminderModalBtn" class="ghost mini" type="button">Close</button>
+        </div>
+        <div class="modal-form">
+          <p id="reminderModalText" class="reminder-text">You have a reminder due.</p>
+          <p id="reminderModalDue" class="section-note"></p>
+          <p id="reminderModalMessage" class="modal-message hidden" role="status" aria-live="polite"></p>
+          <div class="modal-actions split">
+            <div class="modal-inline-actions">
+              <button id="reminderNotifyBtn" class="ghost hidden" type="button">Enable desktop alerts</button>
+            </div>
+            <div class="modal-inline-actions">
+              <button id="reminderSnoozeBtn" class="ghost" type="button">Snooze 1 min</button>
+              <button id="reminderDoneBtn" class="primary" type="button">Dismiss</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>

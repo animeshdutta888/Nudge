@@ -10,6 +10,7 @@ from app.services.storage import read_json
 from app.agent.state import StateStore
 from app.tools.projects import load_projects
 from app.tools.repair import recent_items
+from app.tools.reminders import next_due_reminder
 from app.utils.presentation import assistant_display_text
 from app.utils.time import parse_iso_to_local_date, today_local_date
 
@@ -24,6 +25,7 @@ def build_dashboard_payload(data_dir: Path) -> dict[str, Any]:
     recent_logs = recent_items(data_dir / "logs.json", limit=10)
     recent_notes = recent_items(data_dir / "notes.json", limit=10)
     daily_checkin = _daily_checkin_prompt(data_dir, logs)
+    due_reminder = next_due_reminder(data_dir / "reminders.json")
 
     today = today_local_date()
     logs_today = [x for x in logs if _same_day(x.get("ts", ""), today)]
@@ -56,6 +58,11 @@ def build_dashboard_payload(data_dir: Path) -> dict[str, Any]:
         "recent_notes": recent_notes,
         "recent_conversations": [_clean_conversation(x) for x in reversed(conversations[-24:])],
         "reminders": open_reminders[:12],
+        "due_reminder": None if due_reminder is None else {
+            "id": due_reminder.id,
+            "text": due_reminder.text,
+            "due_ts": due_reminder.due_ts,
+        },
         "projects": projects[:8],
         "timeline": _timeline(logs, notes, reminders, conversations),
         "activity_by_day": [
@@ -218,6 +225,7 @@ def _clean_conversation(item: dict[str, Any]) -> dict[str, Any]:
             assistant = assistant[:idx].strip()
             break
     cleaned["assistant"] = assistant
+    cleaned["tool_result"] = cleaned.get("tool_result") if isinstance(cleaned.get("tool_result"), dict) else None
     return cleaned
 
 

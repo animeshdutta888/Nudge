@@ -7,18 +7,25 @@ from app.services.storage import read_json, write_json
 from app.utils.time import now_local_iso
 
 
-def append_conversation(path: Path, user_text: str, assistant_text: str, source: str) -> None:
+def append_conversation(
+    path: Path,
+    user_text: str,
+    assistant_text: str,
+    source: str,
+    tool_result: dict[str, Any] | None = None,
+) -> None:
     items = read_json(path, default=[])
     if not isinstance(items, list):
         items = []
-    items.append(
-        {
-            "ts": now_local_iso(),
-            "user": user_text.strip(),
-            "assistant": assistant_text.strip(),
-            "source": source.strip() or "cli",
-        }
-    )
+    entry = {
+        "ts": now_local_iso(),
+        "user": user_text.strip(),
+        "assistant": assistant_text.strip(),
+        "source": source.strip() or "cli",
+    }
+    if isinstance(tool_result, dict):
+        entry["tool_result"] = tool_result
+    items.append(entry)
     write_json(path, items[-500:])
 
 
@@ -36,7 +43,7 @@ def load_conversations(path: Path, limit: int = 100) -> list[dict[str, Any]]:
                 "user": str(item.get("user", "")),
                 "assistant": str(item.get("assistant", "")),
                 "source": str(item.get("source", "cli")),
+                "tool_result": item.get("tool_result") if isinstance(item.get("tool_result"), dict) else None,
             }
         )
     return out
-

@@ -118,8 +118,14 @@ class LocalWorkspace:
                 break
         return hits
 
-    async def append_conversation(self, user_text: str, assistant_text: str, source: str) -> None:
-        await asyncio.to_thread(append_conversation, self.conversations_path, user_text, assistant_text, source)
+    async def append_conversation(
+        self,
+        user_text: str,
+        assistant_text: str,
+        source: str,
+        tool_result: dict[str, Any] | None = None,
+    ) -> None:
+        await asyncio.to_thread(append_conversation, self.conversations_path, user_text, assistant_text, source, tool_result)
 
     def load_state(self) -> dict[str, Any]:
         raw = read_json(self.state_path, default={})
