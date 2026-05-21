@@ -10,6 +10,17 @@ def main() -> int:
         print("Fix: create a venv with Python 3.10+ and `pip install -r requirements.txt`.")
         return 1
 
+    if len(sys.argv) > 1:
+        from app.agent.core import run_agent
+
+        arg_text = " ".join(sys.argv[1:]).strip()
+        if arg_text.lower() in {"start-day", "start day"}:
+            arg_text = "start my day"
+        if arg_text.lower() in {"close-day", "close day"}:
+            arg_text = "close my day"
+        print(run_agent(arg_text, source="cli"))
+        return 0
+
     print("Nudge (local-only). Type 'help' or 'quit'.")
     while True:
         try:

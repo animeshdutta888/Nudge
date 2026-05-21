@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 
@@ -27,7 +28,7 @@ def today_local_date() -> date:
     return _local_now().date()
 
 
-def parse_iso_to_local_date(ts: str) -> date | None:
+def parse_iso_to_local_date(ts: str) -> Optional[date]:
     try:
         dt = datetime.fromisoformat(ts)
     except ValueError:

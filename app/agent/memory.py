@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.models.log import LogEntry
 from app.models.note import Note
@@ -66,7 +66,7 @@ class Memory:
                 out.append(e)
         return out
 
-    def add_note(self, text: str, tags: list[str] | None = None) -> Note:
+    def add_note(self, text: str, tags: Optional[list[str]] = None) -> Note:
         note = Note(ts=now_local_iso(), text=text.strip(), tags=tags or [])
         notes = self._load_list(self._notes_path)
         notes.append(asdict(note))

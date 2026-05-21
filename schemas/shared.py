@@ -5,6 +5,83 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 
+class StableRecord(BaseModel):
+    id: str
+    created_at: str
+    updated_at: str
+    source: str = "local"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    version: int = 1
+
+
+class MemorySchema(StableRecord):
+    text: str
+    kind: str
+    confidence: float = 1.0
+
+
+class GoalSchema(StableRecord):
+    text: str
+    done: bool = False
+    done_ts: Optional[str] = None
+
+
+class ProjectSchema(StableRecord):
+    name: str
+    status: str = "active"
+    goals: list[GoalSchema] = Field(default_factory=list)
+
+
+class ReminderSchema(StableRecord):
+    text: str
+    due_ts: Optional[str] = None
+    done: bool = False
+    done_ts: Optional[str] = None
+    confidence: float = 1.0
+
+
+class DailyPlanSchema(StableRecord):
+    date: str
+    summary: str = ""
+    priorities: list[str] = Field(default_factory=list)
+    carry_forward: list[str] = Field(default_factory=list)
+    status: str = "approved"
+
+
+class ApprovalActionSchema(StableRecord):
+    action_id: str
+    type: str
+    risk: Literal["low", "medium", "high"] = "low"
+    requires_approval: bool = True
+    reason: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "approved", "rejected", "completed", "cancelled"] = "pending"
+    confidence: float = 1.0
+
+
+class AgentTraceSchema(StableRecord):
+    trace_id: str
+    input: str = ""
+    intent: str = ""
+    retrieved_memory_ids: list[str] = Field(default_factory=list)
+    retrieved_project_ids: list[str] = Field(default_factory=list)
+    retrieved_reminder_ids: list[str] = Field(default_factory=list)
+    agents_called: list[str] = Field(default_factory=list)
+    actions_proposed: list[dict[str, Any]] = Field(default_factory=list)
+    actions_executed: list[dict[str, Any]] = Field(default_factory=list)
+    approval_status: str = "not_required"
+    final_response: str = ""
+    latency_ms: int = 0
+    model: str = ""
+    errors: list[str] = Field(default_factory=list)
+
+
+class VoiceTranscriptSchema(StableRecord):
+    transcript: str
+    status: str = "ready"
+    confidence: float = 1.0
+
+
 class TraceEvent(BaseModel):
     agent: str
     step: str

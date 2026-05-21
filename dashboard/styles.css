@@ -136,7 +136,9 @@ body {
 
 .topbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+  justify-content: flex-end;
 }
 
 button {
@@ -213,6 +215,12 @@ button:disabled {
   background:
     radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 24%),
     var(--bg-elevated);
+}
+
+.start-day-card-primary {
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 26%),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 42%, var(--bg-elevated)) 0%, var(--bg-elevated) 100%);
 }
 
 .rail-label,
@@ -354,6 +362,100 @@ button:disabled {
   text-align: left;
 }
 
+.start-day-card {
+  display: grid;
+  gap: 10px;
+}
+
+.start-day-status {
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.start-day-status.pending {
+  color: var(--accent);
+}
+
+.start-day-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.start-day-trace-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.start-day-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.start-day-block {
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+.start-day-block-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.start-day-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.start-day-list.ordered {
+  padding-left: 20px;
+}
+
+.start-day-list li + li {
+  margin-top: 6px;
+}
+
+.start-day-trace {
+  display: grid;
+  gap: 8px;
+}
+
+.trace-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.trace-pill {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.start-day-empty {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .status-pill {
   padding: 7px 10px;
   border-radius: 999px;
@@ -367,12 +469,12 @@ button:disabled {
   display: grid;
   gap: 12px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .runtime-summary strong {
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .chat-stage {
@@ -391,6 +493,12 @@ button:disabled {
   gap: 16px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.chat-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .search-shell {
@@ -426,6 +534,17 @@ textarea {
   padding: 4px 2px 12px;
   min-height: 0;
   max-height: 100%;
+}
+
+.mic-status {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .empty-state {
@@ -480,6 +599,11 @@ textarea {
 }
 
 .chat-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-toolbar-actions {
   display: flex;
   gap: 8px;
 }

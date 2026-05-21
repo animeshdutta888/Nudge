@@ -22,6 +22,10 @@ _VALID_INTENTS = {
     "complete_goal",
     "show_persona",
     "show_priorities",
+    "close_day",
+    "close_day_reflection",
+    "show_daily_plan",
+    "update_daily_plan",
     "show_insights",
     "notes_create",
     "notes_search",
@@ -38,6 +42,8 @@ _VALID_INTENTS = {
 class RoutedIntent:
     intent: str
     text: str = ""
+    operation: str = ""
+    target: str = ""
     project: str = ""
     goal: str = ""
     goal_index: int = 0
@@ -70,6 +76,8 @@ class IntentRouter:
         return RoutedIntent(
             intent=intent,
             text=str(data.get("text", "")).strip(),
+            operation=str(data.get("operation", "")).strip(),
+            target=str(data.get("target", "")).strip(),
             project=str(data.get("project", "")).strip(),
             goal=str(data.get("goal", "")).strip(),
             goal_index=_to_int(data.get("goal_index")),

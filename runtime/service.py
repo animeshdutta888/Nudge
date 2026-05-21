@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from agents.critic import CriticAgent
 from agents.governance import GovernanceAgent
@@ -12,18 +13,21 @@ from agents.memory import MemoryAgent
 from agents.retrieval import RetrievalAgent
 from agents.synthesis import SynthesisAgent
 from app.agent.router import IntentRouter
-from app.agent.state import PendingSave, PendingToolAction, StateStore
+from app.agent.state import PendingPlan, PendingSave, PendingToolAction, StateStore
 from app.config import Config
 from app.services.llm import LlmConfig
 from app.services.retrieval import Retriever
 from app.services.semantic_cache import SemanticCache
+from app.tools.daily_plan import add_priority_to_today_plan, close_today_plan, latest_daily_plan, previous_daily_plan, remove_priority_from_today_plan, save_daily_plan
+from app.tools.reflection_planner import build_close_day_summary, infer_goal_completions, parse_close_day_reflection, render_close_day_log, render_close_day_response
 from app.tools.local_tools import LocalToolExecutor, ToolError, extract_remind_text, normalize_shell_command
 from app.tools.projects import add_goal, add_project, describe_project, find_project, load_projects, mark_goal, projects_summary
 from app.tools.reminders import add_reminder, list_reminders, mark_done, resolve_reminder_request
 from app.utils.presentation import assistant_display_text
+from app.utils.time import parse_iso_to_local_date, today_local_date
 from observability.logger import ExecutionLogger
 from orchestration.engine import OrchestrationEngine
-from schemas.shared import RuntimeResponse, SharedState
+from schemas.shared import RuntimeResponse, SharedState, TraceEvent
 from storage.local import LocalWorkspace
 
 
@@ -193,10 +197,79 @@ class NudgeRuntime:
     async def pending_action_response(self, action: str, source: str = "dashboard", persist: bool = False) -> RuntimeResponse:
         state = self._workspace.load_state()
         response_text = "Unsupported action."
-        tool_result: dict[str, object] | None = None
+        tool_result: Optional[dict[str, object]] = None
         if action == "approve":
             pending_plan = state.get("pending_plan")
             if isinstance(pending_plan, dict):
+                if str(pending_plan.get("plan_kind", "")).strip() == "daily_plan":
+                    priorities_raw = pending_plan.get("priorities", pending_plan.get("goals", []))
+                    priorities = [str(item).strip() for item in priorities_raw if str(item).strip()] if isinstance(priorities_raw, list) else []
+                    carry_forward_raw = pending_plan.get("carry_forward", [])
+                    carry_forward = [str(item).strip() for item in carry_forward_raw if str(item).strip()] if isinstance(carry_forward_raw, list) else []
+                    summary = str(pending_plan.get("summary", "")).strip()
+                    plan = save_daily_plan(
+                        self._workspace.daily_plans_path,
+                        priorities,
+                        summary=summary,
+                        source="start_day",
+                        carry_forward=carry_forward,
+                    )
+                    state["pending_plan"] = None
+                    self._workspace.save_state(state)
+                    response_text = "Saved today's plan."
+                    if plan.get("priorities"):
+                        response_text += "\n" + "\n".join(f"- {item}" for item in plan.get("priorities", []))
+                    runtime_state = self._new_state("approve", source)
+                    runtime_state.execution_status = "COMPLETED"
+                    if persist:
+                        await self._workspace.append_conversation("approve", response_text, source, None)
+                    return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
+                if str(pending_plan.get("plan_kind", "")).strip() == "close_day_review":
+                    payload = pending_plan.get("payload", {})
+                    payload_dict = payload if isinstance(payload, dict) else {}
+                    wins_raw = payload_dict.get("wins", pending_plan.get("wins", []))
+                    blockers_raw = payload_dict.get("blockers", pending_plan.get("blockers", []))
+                    carry_raw = payload_dict.get("carry_forward", pending_plan.get("carry_forward", []))
+                    summary = str(payload_dict.get("summary", pending_plan.get("summary", ""))).strip()
+                    wins = [str(item).strip() for item in wins_raw if str(item).strip()] if isinstance(wins_raw, list) else []
+                    blockers = [str(item).strip() for item in blockers_raw if str(item).strip()] if isinstance(blockers_raw, list) else []
+                    carry_forward = [str(item).strip() for item in carry_raw if str(item).strip()] if isinstance(carry_raw, list) else []
+                    updates_raw = payload_dict.get("project_goal_updates", pending_plan.get("project_goal_updates", []))
+                    updates = updates_raw if isinstance(updates_raw, list) else []
+                    plan = close_today_plan(
+                        self._workspace.daily_plans_path,
+                        wins=wins,
+                        blockers=blockers,
+                        carry_forward=carry_forward,
+                        summary=summary,
+                        source="close_day",
+                    )
+                    for update in updates:
+                        if not isinstance(update, dict):
+                            continue
+                        project = str(update.get("project", "")).strip()
+                        goal_index = int(update.get("goal_index", 0) or 0)
+                        if project and goal_index > 0:
+                            mark_goal(self._workspace.projects_path, project, goal_index, True)
+                    reflection_text = render_close_day_log(wins, blockers, carry_forward)
+                    await self._memory.save_explicit("log", reflection_text)
+                    self._workspace.refresh_persona_snapshot()
+                    state["pending_plan"] = None
+                    state["close_day_session"] = None
+                    self._workspace.save_state(state)
+                    response_text = "Saved today's reflection and closed today's plan."
+                    if plan.get("carry_forward"):
+                        response_text += "\nCarry forward:\n" + "\n".join(f"- {item}" for item in plan.get("carry_forward", []))
+                    runtime_state = self._new_state("approve", source)
+                    runtime_state.execution_status = "COMPLETED"
+                    runtime_state.traces.extend(_close_day_trace({
+                        "wins": wins,
+                        "blockers": blockers,
+                        "carry_forward": carry_forward,
+                    }, approved=True))
+                    if persist:
+                        await self._workspace.append_conversation("approve", response_text, source, None)
+                    return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
                 project = str(pending_plan.get("project", "")).strip()
                 goals = pending_plan.get("goals", [])
                 created = add_project(self._workspace.projects_path, project)
@@ -233,9 +306,11 @@ class NudgeRuntime:
                 return RuntimeResponse(text=response_text, run_id=runtime_state.run_id, state=runtime_state)
             pending_tool_action = state.get("pending_tool_action")
             if isinstance(pending_tool_action, dict):
-                tool = str(pending_tool_action.get("tool", "")).strip()
-                action_name = str(pending_tool_action.get("action", "")).strip()
-                payload = pending_tool_action.get("payload", {})
+                payload_raw = pending_tool_action.get("payload")
+                payload_dict = payload_raw if isinstance(payload_raw, dict) else {}
+                tool = str(payload_dict.get("tool", pending_tool_action.get("tool", ""))).strip()
+                action_name = str(payload_dict.get("action", pending_tool_action.get("action", ""))).strip()
+                payload = payload_dict.get("payload", pending_tool_action.get("payload", {}))
                 if tool and action_name and isinstance(payload, dict):
                     try:
                         execution = self._tools.execute(tool, action_name, payload)
@@ -300,6 +375,13 @@ class NudgeRuntime:
     async def _handle_command(self, text: str, source: str) -> Optional[RuntimeResponse]:
         low = text.lower()
         state = self._new_state(text, source)
+        if low in {"start my day", "nudge, start my day", "nudge, start my day.", "start-day", "start day"}:
+            return await self._start_day(state)
+        if low in {"close my day", "nudge, close my day", "nudge, close my day.", "close-day", "close day"}:
+            return self._begin_close_day(state)
+        close_day_response = self._handle_close_day_follow_up(text, source, require_session=True)
+        if close_day_response is not None:
+            return close_day_response
         if low.startswith("log:"):
             record = await self._memory.save_explicit("log", text.split(":", 1)[1].strip())
             self._workspace.refresh_persona_snapshot()
@@ -313,6 +395,11 @@ class NudgeRuntime:
             state.execution_status = "COMPLETED"
             state.memory_context = [record]
             return RuntimeResponse(text="Saved note.", run_id=state.run_id, state=state)
+        daily_plan_edit = _extract_daily_plan_edit(text)
+        if daily_plan_edit is not None:
+            response = self._apply_daily_plan_update(state, operation=daily_plan_edit["operation"], item_text=daily_plan_edit["text"])
+            if response is not None:
+                return response
         # Fast-path for explicit shell requests so they don't get misrouted as filesystem reads.
         if low.startswith("run ") or low.startswith("shell ") or low.startswith("command "):
             command = normalize_shell_command(text)
@@ -495,6 +582,20 @@ class NudgeRuntime:
         if route.intent == "show_priorities":
             state.execution_status = "COMPLETED"
             return RuntimeResponse(text=_summarize_priorities(self._workspace), run_id=state.run_id, state=state)
+        if route.intent == "close_day":
+            state.execution_status = "COMPLETED"
+            return self._begin_close_day(state)
+        if route.intent == "close_day_reflection":
+            return self._handle_close_day_follow_up(route.text or text, source, require_session=False)
+        if route.intent == "show_daily_plan":
+            state.execution_status = "COMPLETED"
+            return RuntimeResponse(text=_describe_today_plan(self._workspace.daily_plans_path), run_id=state.run_id, state=state)
+        if route.intent == "update_daily_plan":
+            response = self._apply_daily_plan_update(state, operation=route.operation or "add", item_text=route.text)
+            if response is not None:
+                return response
+            state.execution_status = "REJECTED"
+            return RuntimeResponse(text="Tell me what to change in today's plan.", run_id=state.run_id, state=state)
         if route.intent == "notes_create":
             return self._run_tool_action(state, "notes", "create", {"text": route.text or extract_remind_text(text)}, route.reason)
         if route.intent == "notes_search":
@@ -579,7 +680,7 @@ class NudgeRuntime:
         raw = state.get("last_filesystem_path")
         return str(raw).strip() if raw is not None else ""
 
-    def _remember_tool_context(self, tool_result: dict[str, Any] | None) -> None:
+    def _remember_tool_context(self, tool_result: Optional[dict[str, Any]]) -> None:
         if not isinstance(tool_result, dict):
             return
         if str(tool_result.get("kind", "")).strip() not in {"filesystem_list", "filesystem_read"}:
@@ -609,7 +710,24 @@ class NudgeRuntime:
 
     def _persist_runtime_state(self, response: RuntimeResponse) -> None:
         state = response.state
-        latest_trace = state.traces[-1].model_dump() if state.traces else None
+        if not state.traces:
+            state.traces.append(
+                TraceEvent(
+                    agent="Runtime",
+                    step="respond",
+                    status="OK" if state.execution_status != "REJECTED" else "ERROR",
+                    message="Completed a local Nudge run.",
+                    payload={
+                        "query": state.query,
+                        "source": state.source,
+                        "execution_status": state.execution_status,
+                    },
+                )
+            )
+        current_state = self._workspace.load_state()
+        runtime_status = current_state.get("runtime_status") if isinstance(current_state, dict) else {}
+        previous_latest_trace = runtime_status.get("latest_trace") if isinstance(runtime_status, dict) and isinstance(runtime_status.get("latest_trace"), dict) else None
+        latest_trace = state.traces[-1].model_dump() if state.traces else previous_latest_trace
         self._workspace.merge_state(
             {
                 "runtime_status": {
@@ -626,6 +744,153 @@ class NudgeRuntime:
                     "latest_trace": latest_trace,
                 }
             }
+        )
+
+    async def _start_day(self, state: SharedState) -> RuntimeResponse:
+        memories = await self._workspace.recent_memories(limit=20)
+        projects = load_projects(self._workspace.projects_path)
+        reminders = list_reminders(self._workspace.reminders_path, upcoming_days=2)
+        today_plan = latest_daily_plan(self._workspace.daily_plans_path)
+        previous_plan = previous_daily_plan(self._workspace.daily_plans_path)
+        plan = _build_start_day_plan(memories, projects, reminders, today_plan, previous_plan)
+
+        state.traces.extend(_start_day_trace(plan))
+        self._state_store.set_pending_plan(
+            PendingPlan(
+                project="daily-plan",
+                summary=str(plan.get("summary", "")).strip(),
+                goals=list(plan.get("priorities", [])),
+                priorities=list(plan.get("priorities", [])),
+                carry_forward=list(plan.get("carry_forward", [])),
+                previous_plan_date=str(plan.get("previous_plan_date", "")).strip(),
+                plan_kind="daily_plan",
+                reason="User asked to start the day and Nudge prepared a focused local plan.",
+                source=state.source,
+            )
+        )
+        state.execution_status = "COMPLETED"
+        return RuntimeResponse(text=_render_start_day_response(plan), run_id=state.run_id, state=state)
+
+    def _begin_close_day(self, state: SharedState) -> RuntimeResponse:
+        current = self._workspace.load_state()
+        current["close_day_session"] = {
+            "status": "awaiting_reflection",
+            "started_at": state.run_id,
+            "source": state.source,
+        }
+        self._workspace.save_state(current)
+        state.traces.extend(_close_day_trace({}, started=True))
+        state.execution_status = "COMPLETED"
+        return RuntimeResponse(
+            text=(
+                "Close My Day check-in:\n"
+                "What did you finish today?\n"
+                "What got stuck?\n"
+                "What should carry forward tomorrow?\n\n"
+                "Reply in one message, for example:\n"
+                "finished: shipped dashboard refresh; stuck: reminder parsing edge case; carry: write demo script"
+            ),
+            run_id=state.run_id,
+            state=state,
+        )
+
+    def _handle_close_day_follow_up(self, text: str, source: str, *, require_session: bool) -> Optional[RuntimeResponse]:
+        current = self._workspace.load_state()
+        session = current.get("close_day_session") if isinstance(current, dict) else None
+        has_active_session = isinstance(session, dict) and str(session.get("status", "")).strip() == "awaiting_reflection"
+        if require_session and not has_active_session:
+            return None
+        low = text.strip().lower()
+        if low in {"approve", "skip"}:
+            return None
+        parsed = parse_close_day_reflection(text)
+        state = self._new_state(text, source)
+        if parsed is None:
+            state.execution_status = "REJECTED"
+            return None if not require_session else RuntimeResponse(
+                text="I couldn't parse that reflection yet. Please reply like `finished: ...; stuck: ...; carry: ...`.",
+                run_id=state.run_id,
+                state=state,
+            )
+        today_plan = latest_daily_plan(self._workspace.daily_plans_path)
+        project_updates = infer_goal_completions(load_projects(self._workspace.projects_path), parsed.get("wins", []))
+        summary = build_close_day_summary(parsed)
+        self._state_store.set_pending_plan(
+            PendingPlan(
+                project="daily-plan",
+                summary=summary,
+                goals=parsed.get("carry_forward", []),
+                priorities=parsed.get("carry_forward", []),
+                carry_forward=parsed.get("carry_forward", []),
+                plan_kind="close_day_review",
+                reason="User completed the Close My Day reflection and Nudge prepared the update for approval.",
+                source=source,
+            )
+        )
+        refreshed = self._workspace.load_state()
+        pending_plan = refreshed.get("pending_plan") if isinstance(refreshed, dict) else {}
+        if isinstance(pending_plan, dict):
+            pending_plan["wins"] = parsed.get("wins", [])
+            pending_plan["blockers"] = parsed.get("blockers", [])
+            pending_plan["carry_forward"] = parsed.get("carry_forward", [])
+            pending_plan["project_goal_updates"] = project_updates
+            payload = pending_plan.get("payload")
+            if isinstance(payload, dict):
+                payload["wins"] = parsed.get("wins", [])
+                payload["blockers"] = parsed.get("blockers", [])
+                payload["carry_forward"] = parsed.get("carry_forward", [])
+                payload["project_goal_updates"] = project_updates
+                payload["current_plan_priorities"] = today_plan.get("priorities", []) if isinstance(today_plan, dict) else []
+                pending_plan["payload"] = payload
+            refreshed["pending_plan"] = pending_plan
+            refreshed["close_day_session"] = {
+                "status": "awaiting_approval",
+                "source": source,
+            }
+            self._workspace.save_state(refreshed)
+        state.traces.extend(_close_day_trace(parsed, approved=False))
+        state.execution_status = "COMPLETED"
+        return RuntimeResponse(text=render_close_day_response(parsed), run_id=state.run_id, state=state)
+
+    def _apply_daily_plan_update(self, state: SharedState, *, operation: str, item_text: str) -> Optional[RuntimeResponse]:
+        clean_item = str(item_text).strip()
+        action = str(operation or "add").strip().lower()
+        if not clean_item:
+            return None
+        raw_state = self._workspace.load_state()
+        pending_plan = raw_state.get("pending_plan") if isinstance(raw_state, dict) else None
+        if isinstance(pending_plan, dict) and str(pending_plan.get("plan_kind", "")).strip() == "daily_plan":
+            priorities_raw = pending_plan.get("priorities", pending_plan.get("goals", []))
+            priorities = [str(item).strip() for item in priorities_raw if str(item).strip()] if isinstance(priorities_raw, list) else []
+            priorities = _update_priority_list(priorities, action, clean_item)
+            priorities = priorities[:3]
+            pending_plan["priorities"] = priorities
+            pending_plan["goals"] = priorities
+            raw_state["pending_plan"] = pending_plan
+            self._workspace.save_state(raw_state)
+            state.execution_status = "COMPLETED"
+            return RuntimeResponse(
+                text=_render_daily_plan_update_message("Updated today's draft plan.", priorities),
+                run_id=state.run_id,
+                state=state,
+            )
+        if action == "remove":
+            plan = remove_priority_from_today_plan(self._workspace.daily_plans_path, clean_item)
+        else:
+            plan = add_priority_to_today_plan(self._workspace.daily_plans_path, clean_item)
+        if plan is None:
+            state.execution_status = "REJECTED"
+            return RuntimeResponse(
+                text="I couldn't find today's saved plan yet. Start your day first, then I can update it.",
+                run_id=state.run_id,
+                state=state,
+            )
+        priorities = [str(item).strip() for item in plan.get("priorities", []) if str(item).strip()]
+        state.execution_status = "COMPLETED"
+        return RuntimeResponse(
+            text=_render_daily_plan_update_message("Updated today's plan.", priorities),
+            run_id=state.run_id,
+            state=state,
         )
 
     def _routing_context(self) -> str:
@@ -668,7 +933,7 @@ def _candidate_kind(text: str) -> str:
     return "log" if any(marker in low for marker in time_markers) else "note"
 
 
-def _match_project_query(projects_path, text: str) -> str | None:
+def _match_project_query(projects_path, text: str) -> Optional[str]:
     low = text.lower()
     if not any(marker in low for marker in ("project", "what is", "what's", "tell me", "show", "open", "status", "about")):
         return None
@@ -736,7 +1001,253 @@ def _summarize_priorities(workspace: LocalWorkspace) -> str:
     return "\n".join(lines)
 
 
+def _build_start_day_plan(
+    memories,
+    projects,
+    reminders,
+    today_plan: Optional[dict[str, Any]],
+    previous_plan: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    focus_signals: list[str] = []
+    for item in memories:
+        text = str(item.text).strip()
+        low = text.lower()
+        if "focus=" in low:
+            focus_signals.append(text.split("focus=", 1)[1].split(";", 1)[0].strip())
+
+    active_projects = [
+        project for project in projects
+        if isinstance(project, dict) and str(project.get("status", "active")).strip().lower() == "active"
+    ]
+    open_goals: list[tuple[str, str]] = []
+    stale_projects: list[str] = []
+    today = today_local_date()
+    for project in active_projects:
+        project_name = str(project.get("name", "")).strip() or "Unnamed project"
+        created = parse_iso_to_local_date(str(project.get("created_ts", "")))
+        goals = project.get("goals", [])
+        if isinstance(goals, list):
+            for goal in goals:
+                if not isinstance(goal, dict) or bool(goal.get("done", False)):
+                    continue
+                text = str(goal.get("text", "")).strip()
+                if text:
+                    open_goals.append((project_name, text))
+        if created is not None and created.toordinal() <= today.toordinal() - 2:
+            stale_projects.append(project_name)
+
+    carry_forward: list[str] = []
+    previous_plan_date = ""
+    if isinstance(today_plan, dict):
+        today_priorities = today_plan.get("priorities", [])
+        carry_forward = [str(item).strip() for item in today_priorities if str(item).strip()][:2] if isinstance(today_priorities, list) else []
+    if not carry_forward and isinstance(previous_plan, dict):
+        previous_plan_date = str(previous_plan.get("date", "")).strip()
+        prior_items = previous_plan.get("priorities", [])
+        carry_forward = [str(item).strip() for item in prior_items if str(item).strip()][:2] if isinstance(prior_items, list) else []
+
+    priorities: list[str] = []
+    for item in carry_forward:
+        if item not in priorities and len(priorities) < 3:
+            priorities.append(item)
+    for project_name, goal_text in open_goals:
+        if len(priorities) >= 3:
+            break
+        candidate = f"Finish: {goal_text} ({project_name})"
+        if candidate not in priorities and goal_text not in priorities:
+            priorities.append(candidate)
+    for signal in focus_signals:
+        if len(priorities) >= 3:
+            break
+        candidate = f"Protect focus: {signal}"
+        if candidate not in priorities:
+            priorities.append(candidate)
+    if not priorities:
+        priorities = [
+            "Review active projects and pick one concrete next step.",
+            "Clear one small blocker before noon.",
+            "Capture a win or blocker in Nudge by the end of the day.",
+        ]
+
+    top_task = priorities[0]
+    reminder_line = "No urgent reminders."
+    if reminders:
+        item = reminders[0]
+        reminder_line = f"Pending reminder: {item.text}" + (f" ({item.due_ts})" if item.due_ts else "")
+    stale_line = ", ".join(stale_projects[:2]) if stale_projects else "No stale projects detected."
+    summary = f"Highest leverage task: {top_task}"
+    return {
+        "summary": summary,
+        "priorities": priorities[:3],
+        "carry_forward": carry_forward[:2],
+        "previous_plan_date": previous_plan_date,
+        "stale_line": stale_line,
+        "reminder_line": reminder_line,
+        "active_projects_count": len(active_projects),
+        "open_goals_count": len(open_goals),
+        "reminders_count": len(reminders),
+        "stale_projects_count": len(stale_projects),
+        "focus_signals_count": len(focus_signals),
+    }
+
+
+def _render_start_day_response(plan: dict[str, Any]) -> str:
+    priorities = [f"- {item}" for item in plan.get("priorities", []) if str(item).strip()]
+    carry_forward = [f"- {item}" for item in plan.get("carry_forward", []) if str(item).strip()]
+    carry_block = ""
+    if carry_forward:
+        previous_plan_date = str(plan.get("previous_plan_date", "")).strip()
+        carry_label = "Carry forward from today's earlier plan" if not previous_plan_date else f"Carry forward from {previous_plan_date}"
+        carry_block = carry_label + ":\n" + "\n".join(carry_forward) + "\n\n"
+    return (
+        "Good morning. Here is what matters today:\n\n"
+        f"1. {plan.get('summary', 'Highest leverage task not found.')}\n"
+        f"2. Stale project check: {plan.get('stale_line', 'No stale projects detected.')}\n"
+        f"3. {plan.get('reminder_line', 'No urgent reminders.')}\n\n"
+        + carry_block
+        + "Suggested plan:\n"
+        + "\n".join(priorities)
+        + "\n\nI can save this as today's plan. Approve?"
+    )
+
+
+def _start_day_trace(plan: dict[str, Any]) -> list[TraceEvent]:
+    priorities = [str(item).strip() for item in plan.get("priorities", []) if str(item).strip()]
+    carry_forward = [str(item).strip() for item in plan.get("carry_forward", []) if str(item).strip()]
+    return [
+        TraceEvent(
+            agent="IntentRouter",
+            step="start_day",
+            status="OK",
+            message="Recognized the dedicated Start My Day workflow.",
+            payload={"intent": "start_day"},
+        ),
+        TraceEvent(
+            agent="ContextRetrieval",
+            step="collect_context",
+            status="OK",
+            message="Loaded local projects, reminders, recent memory, and prior daily plans.",
+            payload={
+                "active_projects": int(plan.get("active_projects_count", 0) or 0),
+                "open_goals": int(plan.get("open_goals_count", 0) or 0),
+                "upcoming_reminders": int(plan.get("reminders_count", 0) or 0),
+                "carry_forward": len(carry_forward),
+            },
+        ),
+        TraceEvent(
+            agent="DailyPlanning",
+            step="compose_plan",
+            status="OK",
+            message="Built a 3-priority plan with carry-forward and stale-project checks.",
+            payload={
+                "priorities": priorities[:3],
+                "stale_projects": int(plan.get("stale_projects_count", 0) or 0),
+                "focus_signals": int(plan.get("focus_signals_count", 0) or 0),
+            },
+        ),
+        TraceEvent(
+            agent="Approval",
+            step="await_approval",
+            status="OK",
+            message="Prepared the plan for approval before saving durable state.",
+            payload={"requires_approval": True},
+        ),
+    ]
+
+
 def _clean_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _extract_daily_plan_edit(text: str) -> Optional[dict[str, str]]:
+    raw = str(text).strip()
+    patterns = (
+        (r"^edit\s+today(?:'s|s)?\s+plan\s+to\s+(?:add|include)\s+(.+)$", "add"),
+        (r"^update\s+today(?:'s|s)?\s+plan\s+to\s+(?:add|include)\s+(.+)$", "add"),
+        (r"^add\s+(.+?)\s+to\s+today(?:'s|s)?\s+plan$", "add"),
+        (r"^include\s+(.+?)\s+in\s+today(?:'s|s)?\s+plan$", "add"),
+        (r"^remove\s+(.+?)\s+from\s+today(?:'s|s)?\s+plan$", "remove"),
+        (r"^edit\s+today(?:'s|s)?\s+plan\s+to\s+remove\s+(.+)$", "remove"),
+    )
+    for pattern, operation in patterns:
+        match = re.match(pattern, raw, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = match.group(1).strip().rstrip(".")
+        return {"operation": operation, "text": candidate}
+    return None
+
+
+def _update_priority_list(priorities: list[str], operation: str, item_text: str) -> list[str]:
+    action = str(operation).strip().lower()
+    clean_item = str(item_text).strip()
+    existing = [str(item).strip() for item in priorities if str(item).strip()]
+    if action == "remove":
+        lowered = clean_item.lower()
+        updated = [item for item in existing if item.lower() != lowered]
+        if len(updated) == len(existing):
+            updated = [item for item in existing if lowered not in item.lower()]
+        return updated
+    if clean_item not in existing:
+        existing.append(clean_item)
+    return existing
+
+
+def _render_daily_plan_update_message(prefix: str, priorities: list[str]) -> str:
+    if not priorities:
+        return prefix + "\n- No priorities left in today's plan."
+    return prefix + "\n" + "\n".join(f"- {item}" for item in priorities)
+
+
+def _describe_today_plan(path) -> str:
+    plan = latest_daily_plan(path)
+    if not isinstance(plan, dict):
+        return "I couldn't find a saved plan for today yet."
+    priorities = [str(item).strip() for item in plan.get("priorities", []) if str(item).strip()]
+    if not priorities:
+        return "Today's plan is saved, but it does not have priorities yet."
+    summary = str(plan.get("summary", "")).strip()
+    lines = ["Today's plan:"]
+    if summary:
+        lines.append(summary)
+    lines.extend(f"- {item}" for item in priorities)
+    if plan.get("status") == "closed":
+        close_summary = str(plan.get("close_day_summary", "")).strip()
+        if close_summary:
+            lines.append(close_summary)
+    return "\n".join(lines)
+
+
+def _close_day_trace(parsed: dict[str, list[str]], *, started: bool = False, approved: bool = False) -> list[TraceEvent]:
+    if started:
+        return [
+            TraceEvent(
+                agent="IntentRouter",
+                step="close_day",
+                status="OK",
+                message="Recognized the Close My Day workflow and opened a reflection prompt.",
+                payload={"intent": "close_day"},
+            )
+        ]
+    return [
+        TraceEvent(
+            agent="Reflection",
+            step="summarize_day",
+            status="OK",
+            message="Extracted wins, blockers, and carry-forward work from the user's reflection.",
+            payload={
+                "wins": len(parsed.get("wins", [])),
+                "blockers": len(parsed.get("blockers", [])),
+                "carry_forward": len(parsed.get("carry_forward", [])),
+            },
+        ),
+        TraceEvent(
+            agent="Approval",
+            step="await_approval" if not approved else "approved",
+            status="OK",
+            message="Prepared the close-day update for approval." if not approved else "Saved the close-day reflection and updated today's plan.",
+            payload={"requires_approval": not approved},
+        ),
+    ]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.services.storage import read_json, write_json
 
@@ -52,7 +52,7 @@ def pin_recent(path: Path, recent_index: int, pinned: bool) -> bool:
     return True
 
 
-def _resolve_recent_index(items: list[dict[str, Any]], recent_index: int) -> int | None:
+def _resolve_recent_index(items: list[dict[str, Any]], recent_index: int) -> Optional[int]:
     if recent_index < 1:
         return None
     if recent_index > len(items):
@@ -63,4 +63,3 @@ def _resolve_recent_index(items: list[dict[str, Any]], recent_index: int) -> int
 def _load(path: Path) -> list[dict[str, Any]]:
     data = read_json(path, default=[])
     return data if isinstance(data, list) else []
-

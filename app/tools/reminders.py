@@ -4,7 +4,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.models.reminder import Reminder
 from app.services.storage import read_json, write_json
@@ -13,12 +13,12 @@ from app.utils.time import now_local_iso
 
 @dataclass(frozen=True)
 class ReminderResolution:
-    due_ts: str | None
+    due_ts: Optional[str]
     text: str
     error: str = ""
 
 
-def add_reminder(reminders_path: Path, text: str, due_ts: str | None) -> Reminder:
+def add_reminder(reminders_path: Path, text: str, due_ts: Optional[str]) -> Reminder:
     reminders = _load_list(reminders_path)
     next_id = (max((int(r.get("id", 0)) for r in reminders if isinstance(r, dict)), default=0) + 1) if reminders else 1
     r = Reminder(
@@ -35,7 +35,7 @@ def add_reminder(reminders_path: Path, text: str, due_ts: str | None) -> Reminde
 
 
 def resolve_reminder_request(raw_text: str, *, when_hint: str = "", text_hint: str = "") -> ReminderResolution:
-    candidates: list[tuple[str | None, str]] = []
+    candidates: list[tuple[Optional[str], str]] = []
     stale_candidate = False
 
     when_hint = when_hint.strip()
@@ -146,7 +146,7 @@ def snooze_reminder(reminders_path: Path, reminder_id: int, minutes: int = 1) ->
     return changed
 
 
-def next_due_reminder(reminders_path: Path) -> Reminder | None:
+def next_due_reminder(reminders_path: Path) -> Optional[Reminder]:
     now = datetime.now().astimezone()
     due_items: list[Reminder] = []
     for reminder in list_reminders(reminders_path, upcoming_days=365):
@@ -162,7 +162,7 @@ def next_due_reminder(reminders_path: Path) -> Reminder | None:
     return sorted(due_items, key=lambda item: item.due_ts or item.created_ts)[0]
 
 
-def parse_remind_command(raw: str) -> tuple[str | None, str]:
+def parse_remind_command(raw: str) -> tuple[Optional[str], str]:
     """
     Very small local parser.
 
@@ -220,7 +220,7 @@ def parse_remind_command(raw: str) -> tuple[str | None, str]:
     return None, s
 
 
-def _safe_parse_dt(ts: str) -> datetime | None:
+def _safe_parse_dt(ts: str) -> Optional[datetime]:
     try:
         dt = datetime.fromisoformat(ts)
     except ValueError:
@@ -236,7 +236,7 @@ def _is_future_due(ts: str, *, grace_seconds: int = 2) -> bool:
     return dt >= threshold
 
 
-def _parse_time_fragment(fragment: str) -> str | None:
+def _parse_time_fragment(fragment: str) -> Optional[str]:
     due_ts, _ = parse_remind_command(f"{fragment.strip()} placeholder")
     return due_ts
 

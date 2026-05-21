@@ -21,6 +21,7 @@ class Config:
     persona_path: Path
     state_path: Path
     reminders_path: Path
+    daily_plans_path: Path
     conversations_path: Path
     projects_path: Path
     semantic_cache_path: Path
@@ -59,6 +60,7 @@ class Config:
         persona_path = data_dir / "persona.json"
         state_path = data_dir / "state.json"
         reminders_path = data_dir / "reminders.json"
+        daily_plans_path = data_dir / "daily_plans.json"
         conversations_path = data_dir / "conversations.json"
         projects_path = data_dir / "projects.json"
         semantic_cache_path = data_dir / "semantic_cache.json"
@@ -95,6 +97,7 @@ class Config:
             persona_path=persona_path,
             state_path=state_path,
             reminders_path=reminders_path,
+            daily_plans_path=daily_plans_path,
             conversations_path=conversations_path,
             projects_path=projects_path,
             semantic_cache_path=semantic_cache_path,

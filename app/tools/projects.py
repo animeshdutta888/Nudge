@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.services.storage import read_json, write_json
 from app.utils.time import now_local_iso
@@ -179,14 +179,14 @@ def projects_summary(path: Path) -> str:
     return "\n".join(lines) if lines else "No projects yet."
 
 
-def find_project(path: Path, query: str) -> dict[str, Any] | None:
+def find_project(path: Path, query: str) -> Optional[dict[str, Any]]:
     clean = query.strip()
     if not clean:
         return None
     projects = load_projects(path)
     query_key = _project_key(clean)
-    exact_match: dict[str, Any] | None = None
-    partial_match: dict[str, Any] | None = None
+    exact_match: Optional[dict[str, Any]] = None
+    partial_match: Optional[dict[str, Any]] = None
     for project in projects:
         if not isinstance(project, dict):
             continue

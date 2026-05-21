@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.models.log import LogEntry
 from app.models.note import Note
@@ -22,6 +22,7 @@ class LocalWorkspace:
         self.persona_path = data_dir / "persona.json"
         self.state_path = data_dir / "state.json"
         self.reminders_path = data_dir / "reminders.json"
+        self.daily_plans_path = data_dir / "daily_plans.json"
         self.conversations_path = data_dir / "conversations.json"
         self.projects_path = data_dir / "projects.json"
         self.semantic_cache_path = data_dir / "semantic_cache.json"
@@ -42,10 +43,12 @@ class LocalWorkspace:
                 "autosave_enabled": True,
                 "asked_questions": [],
                 "last_question": None,
+                "close_day_session": None,
                 "daily_checkin": {"last_prompt_date": None, "dismissed_date": None},
             },
         )
         ensure_json_file(self.reminders_path, [])
+        ensure_json_file(self.daily_plans_path, [])
         ensure_json_file(self.conversations_path, [])
         ensure_json_file(self.projects_path, [])
         ensure_json_file(self.semantic_cache_path, {"items": []})
@@ -123,7 +126,7 @@ class LocalWorkspace:
         user_text: str,
         assistant_text: str,
         source: str,
-        tool_result: dict[str, Any] | None = None,
+        tool_result: Optional[dict[str, Any]] = None,
     ) -> None:
         await asyncio.to_thread(append_conversation, self.conversations_path, user_text, assistant_text, source, tool_result)
 

@@ -2,11 +2,25 @@ const summaryCards = document.getElementById("summaryCards");
 const runtimeRibbon = document.getElementById("runtimeRibbon");
 const runtimeSummary = document.getElementById("runtimeSummary");
 const runtimeStatusTag = document.getElementById("runtimeStatusTag");
+const topbarStartDayBtn = document.getElementById("topbarStartDayBtn");
+const topbarCloseDayBtn = document.getElementById("topbarCloseDayBtn");
 const focusChips = document.getElementById("focusChips");
+const heroStartDayBtn = document.getElementById("heroStartDayBtn");
+const heroCloseDayBtn = document.getElementById("heroCloseDayBtn");
 const chatFeed = document.getElementById("chatFeed");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
+const micBtn = document.getElementById("micBtn");
+const speakResponseBtn = document.getElementById("speakResponseBtn");
+const micStatusBar = document.getElementById("micStatusBar");
 const quickPrompts = document.getElementById("quickPrompts");
+const startDayBtn = document.getElementById("startDayBtn");
+const startDayStatus = document.getElementById("startDayStatus");
+const startDaySummary = document.getElementById("startDaySummary");
+const startDayActions = document.getElementById("startDayActions");
+const startDayCarryForward = document.getElementById("startDayCarryForward");
+const startDayPriorities = document.getElementById("startDayPriorities");
+const startDayTrace = document.getElementById("startDayTrace");
 const conversationSearchInput = document.getElementById("conversationSearchInput");
 const contextSearchInput = document.getElementById("contextSearchInput");
 const contextTabs = document.getElementById("contextTabs");
@@ -67,6 +81,7 @@ let visibleChats = [];
 let activeContextTab = "memory";
 let pendingActionActive = false;
 let pendingActionSubmitting = false;
+let suppressDailyCheckinPromptUntil = 0;
 let activeChatStartTs = "";
 let activeChatAnchorCount = 0;
 let contextExpanded = {
@@ -80,15 +95,160 @@ let reminderActionSubmitting = false;
 const seenReminderKeys = new Set();
 const reminderTimeouts = new Map();
 const REMINDER_AUTO_OPEN_GRACE_MS = 15000;
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const speechSynthesisSupported = typeof window.speechSynthesis !== "undefined" && typeof window.SpeechSynthesisUtterance !== "undefined";
+const VOICE_SETTINGS_KEY = "nudge-voice-settings";
+let speechRecognition = null;
+let micListening = false;
+
+function loadVoiceSettings() {
+  try {
+    const raw = window.localStorage.getItem(VOICE_SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      voice_output_enabled: Boolean(parsed.voice_output_enabled),
+      confirm_before_speaking: parsed.confirm_before_speaking !== false,
+    };
+  } catch (error) {
+    return { voice_output_enabled: false, confirm_before_speaking: true };
+  }
+}
 
 function init() {
   hydrateTheme();
   renderQuickPrompts();
+  initSpeechRecognition();
+  syncSpeakButton();
   wireEvents();
   loadOverview();
   window.setInterval(() => {
     loadOverview();
   }, OVERVIEW_POLL_MS);
+}
+
+function initSpeechRecognition() {
+  if (!SpeechRecognitionCtor) {
+    if (micBtn) {
+      micBtn.disabled = true;
+      micBtn.title = "Browser speech input is not supported here.";
+    }
+    return;
+  }
+  speechRecognition = new SpeechRecognitionCtor();
+  speechRecognition.lang = "en-US";
+  speechRecognition.interimResults = true;
+  speechRecognition.maxAlternatives = 1;
+
+  speechRecognition.onstart = () => {
+    micListening = true;
+    syncMicButton();
+    setMicStatus("Listening... say something and I'll place it in the composer.", false);
+  };
+
+  speechRecognition.onresult = (event) => {
+    const transcript = Array.from(event.results)
+      .map((result) => result[0] && result[0].transcript ? result[0].transcript : "")
+      .join(" ")
+      .trim();
+    if (!transcript) return;
+    chatInput.value = transcript;
+    chatInput.focus();
+    chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+    const isFinal = event.results[event.results.length - 1] && event.results[event.results.length - 1].isFinal;
+    setMicStatus(isFinal ? "Transcript ready. Edit if needed, then send." : "Listening... transcript is updating.", false);
+  };
+
+  speechRecognition.onerror = (event) => {
+    micListening = false;
+    syncMicButton();
+    const errorText = event && event.error ? String(event.error) : "unknown error";
+    setMicStatus(`Mic input stopped: ${errorText}.`, true);
+  };
+
+  speechRecognition.onend = () => {
+    micListening = false;
+    syncMicButton();
+    if (chatInput.value.trim()) {
+      setMicStatus("Transcript ready. Edit if needed, then send.", false);
+      return;
+    }
+    setMicStatus("Mic stopped. Try again when you're ready.", true);
+  };
+  syncMicButton();
+}
+
+function syncMicButton() {
+  if (!micBtn) return;
+  micBtn.textContent = micListening ? "Stop Mic" : "Mic";
+  micBtn.classList.toggle("primary", micListening);
+  micBtn.classList.toggle("ghost", !micListening);
+}
+
+function setMicStatus(message, hide = false) {
+  if (!micStatusBar) return;
+  if (hide || !message) {
+    micStatusBar.textContent = "";
+    micStatusBar.classList.add("hidden");
+    return;
+  }
+  micStatusBar.textContent = message;
+  micStatusBar.classList.remove("hidden");
+}
+
+function getLatestAssistantReply() {
+  const items = Array.isArray(visibleChats) ? visibleChats : [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (!item || item.pending) continue;
+    const text = normalizeAssistantText(item.assistant || "");
+    if (text) return text;
+  }
+  return "";
+}
+
+function syncSpeakButton() {
+  if (!speakResponseBtn) return;
+  if (!speechSynthesisSupported) {
+    speakResponseBtn.disabled = true;
+    speakResponseBtn.title = "Browser text-to-speech is not supported here.";
+    return;
+  }
+  const latest = getLatestAssistantReply();
+  speakResponseBtn.disabled = !latest;
+  speakResponseBtn.title = latest ? "Speak the latest Nudge response." : "No Nudge response available yet.";
+}
+
+function speakLatestAssistantResponse() {
+  if (!speechSynthesisSupported) return;
+  const latest = getLatestAssistantReply();
+  if (!latest) {
+    syncSpeakButton();
+    return;
+  }
+  const settings = loadVoiceSettings();
+  if (settings.confirm_before_speaking && !window.confirm("Speak the latest Nudge response?")) {
+    return;
+  }
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(new window.SpeechSynthesisUtterance(latest));
+}
+
+function toggleMicInput() {
+  if (!speechRecognition) {
+    setMicStatus("Browser speech input is not supported in this browser.", false);
+    return;
+  }
+  if (micListening) {
+    speechRecognition.stop();
+    return;
+  }
+  chatInput.focus();
+  setMicStatus("Starting microphone...", false);
+  try {
+    speechRecognition.start();
+  } catch (error) {
+    setMicStatus(`Could not start microphone: ${error.message || error}`, false);
+  }
 }
 
 async function loadOverview() {
@@ -106,14 +266,16 @@ async function loadOverview() {
 function renderOverview(data) {
   renderSummary(data.summary || {});
   renderRuntime(data.runtime || {});
+  renderStartDay(data.daily_plan || null, data.runtime || {}, data.pending_action || null);
   renderFocus(data.focus || []);
   visibleChats = sortChatsChronologically((data.recent_conversations || []).slice(0, MAX_VISIBLE_CHATS).map(cleanChatItem));
   renderChat(filterConversation(visibleChats, conversationSearchInput.value.trim()));
   renderCurrentContext(data);
   pendingActionActive = Boolean(data.pending_action);
-  syncDailyCheckin(data.daily_checkin || {});
+  syncDailyCheckin(data.daily_checkin || {}, data);
   syncReminderTimers(data.reminders || []);
   syncDueReminder(data.due_reminder || null);
+  syncSpeakButton();
 }
 
 function renderSummary(summary) {
@@ -139,13 +301,6 @@ function renderRuntime(runtime) {
   const status = String(runtime.status || "IDLE").toUpperCase();
   const degraded = Boolean(runtime.degraded_mode);
   runtimeStatusTag.textContent = degraded ? `${status} / DEGRADED` : status;
-  runtimeRibbon.innerHTML = [
-    runtime.mode || "LOCAL-FIRST",
-    runtime.network || "DISCONNECTED",
-    degraded ? "FALLBACK ACTIVE" : "HEALTHY",
-  ]
-    .map((item) => `<span class="pill">${escapeHtml(item)}</span>`)
-    .join("");
 
   runtimeSummary.innerHTML = `
     <div><strong>Latest query</strong><br />${escapeHtml(runtime.query || "No recent run yet.")}</div>
@@ -175,6 +330,131 @@ function renderQuickPrompts() {
   ).join("");
 }
 
+function renderStartDay(dailyPlan, runtime, pendingAction) {
+  const pendingPlan = pendingAction && pendingAction.kind === "plan" ? pendingAction : null;
+  const pendingDailyPlan = pendingPlan && pendingPlan.plan_kind === "daily_plan" ? pendingPlan : null;
+  const pendingCloseDayReview = pendingPlan && pendingPlan.plan_kind === "close_day_review" ? pendingPlan : null;
+  const plan = pendingCloseDayReview || pendingDailyPlan || dailyPlan || null;
+  const hasPlan = Boolean(plan);
+  const priorities = Array.isArray(plan && plan.priorities) ? plan.priorities.filter(Boolean).slice(0, 3) : [];
+  const carryForward = Array.isArray(plan && plan.carry_forward) ? plan.carry_forward.filter(Boolean).slice(0, 3) : [];
+  const wins = Array.isArray(plan && plan.wins) ? plan.wins.filter(Boolean).slice(0, 5) : [];
+  const blockers = Array.isArray(plan && plan.blockers) ? plan.blockers.filter(Boolean).slice(0, 5) : [];
+  const statusText = pendingCloseDayReview
+    ? "Review today's reflection"
+    : pendingDailyPlan
+      ? "Review this plan"
+      : hasPlan
+        ? `Saved for ${String(plan.date || "today")}`
+        : "Ready when you are.";
+
+  startDayStatus.textContent = statusText;
+  startDayStatus.classList.toggle("pending", Boolean(pendingPlan));
+  startDaySummary.textContent = pendingCloseDayReview
+    ? "Nudge extracted wins, blockers, and carry-forward work. Review before saving today's reflection."
+    : String(plan && plan.summary ? plan.summary : "Build a focused daily plan from projects, reminders, and recent context.");
+  renderStartDayActions(pendingPlan);
+
+  if (!carryForward.length) {
+    startDayCarryForward.classList.add("hidden");
+    startDayCarryForward.innerHTML = "";
+  } else {
+    const carryLabel = plan && plan.previous_plan_date
+      ? `Carry forward from ${String(plan.previous_plan_date)}`
+      : "Carry forward";
+    startDayCarryForward.classList.remove("hidden");
+    startDayCarryForward.innerHTML = `
+      <div class="start-day-block-title">${escapeHtml(carryLabel)}</div>
+      <ul class="start-day-list">
+        ${carryForward.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}
+      </ul>
+    `;
+  }
+
+  if (pendingCloseDayReview) {
+    startDayPriorities.innerHTML = renderCloseDayReview(wins, blockers, carryForward);
+  } else if (!priorities.length) {
+    startDayPriorities.innerHTML = `<div class="start-day-empty">No priorities saved yet. Run Start My Day to generate one.</div>`;
+  } else {
+    startDayPriorities.innerHTML = `
+      <div class="start-day-block-title">Top priorities</div>
+      <ol class="start-day-list ordered">
+        ${priorities.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}
+      </ol>
+    `;
+  }
+
+  const traceItems = buildStartDayTrace(runtime, pendingPlan, priorities, wins, blockers, carryForward);
+  startDayTrace.innerHTML = traceItems.length
+    ? traceItems.map((item) => `<div class="trace-row"><span class="trace-pill">${escapeHtml(item.label)}</span><span>${escapeHtml(item.value)}</span></div>`).join("")
+    : `<div class="start-day-empty">No Start My Day trace yet.</div>`;
+}
+
+function renderCloseDayReview(wins, blockers, carryForward) {
+  const section = (title, items, empty) => `
+    <div class="start-day-block-title">${escapeHtml(title)}</div>
+    ${
+      items.length
+        ? `<ul class="start-day-list">${items.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}</ul>`
+        : `<div class="start-day-empty">${escapeHtml(empty)}</div>`
+    }
+  `;
+  return [
+    section("Wins", wins, "No wins captured yet."),
+    section("Blockers", blockers, "No blockers captured yet."),
+    section("Carry forward", carryForward, "No carry-forward items captured yet."),
+  ].join("");
+}
+
+function renderStartDayActions(pendingPlan) {
+  if (!pendingPlan) {
+    startDayActions.classList.add("hidden");
+    startDayActions.innerHTML = "";
+    return;
+  }
+  const labels = getPendingActionLabels();
+  startDayActions.classList.remove("hidden");
+  startDayActions.innerHTML = `
+    <button class="primary mini" type="button" data-pending-action="approve"${pendingActionSubmitting ? " disabled" : ""}>${escapeHtml(labels.approve)}</button>
+    <button class="ghost mini" type="button" data-pending-action="skip"${pendingActionSubmitting ? " disabled" : ""}>${escapeHtml(labels.skip)}</button>
+  `;
+}
+
+function buildStartDayTrace(runtime, pendingPlan, priorities, wins, blockers, carryForward) {
+  const rows = [];
+  const latestTrace = runtime && typeof runtime.latest_trace === "object" ? runtime.latest_trace : null;
+  const query = String((runtime && runtime.query) || "").trim().toLowerCase();
+  const pendingCloseDayReview = pendingPlan && pendingPlan.plan_kind === "close_day_review";
+  const pendingDailyPlan = pendingPlan && pendingPlan.plan_kind === "daily_plan";
+  if (latestTrace) {
+    rows.push({ label: latestTrace.agent || "Trace", value: latestTrace.message || "Latest workflow trace available." });
+  }
+  if (pendingCloseDayReview || query.includes("close")) {
+    rows.push({ label: "Intent", value: "close_day" });
+  } else if (query.includes("start") || pendingDailyPlan || priorities.length) {
+    rows.push({ label: "Intent", value: "start_day" });
+  }
+  if (pendingCloseDayReview) {
+    rows.push({
+      label: "Reflection",
+      value: `${wins.length || 0} wins, ${blockers.length || 0} blockers, ${carryForward.length || 0} carry-forward items`,
+    });
+  } else {
+    rows.push({
+      label: "Plan",
+      value: pendingDailyPlan
+        ? `${priorities.length || 0} priorities prepared, waiting for approval`
+        : priorities.length
+          ? `${priorities.length} priorities saved locally`
+          : "No saved plan yet",
+    });
+  }
+  if (runtime && runtime.retrieved_chunks) {
+    rows.push({ label: "Retrieved", value: `${String(runtime.retrieved_chunks)} memory items` });
+  }
+  return rows.slice(0, 4);
+}
+
 function renderChat(items) {
   const shouldStick = chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight < 100;
   if (!items.length) {
@@ -183,11 +463,12 @@ function renderChat(items) {
   }
   chatFeed.innerHTML = items
     .map((item, index) => {
-      const actionBar = item.pendingAction && index === 0
+      const pendingLabels = getPendingActionLabels();
+      const actionBar = item.pendingAction && index === items.length - 1
         ? `
           <div class="chat-actions">
-            <button class="ghost mini" data-pending-action="approve" type="button"${pendingActionSubmitting ? " disabled" : ""}>Approve</button>
-            <button class="ghost mini" data-pending-action="skip" type="button"${pendingActionSubmitting ? " disabled" : ""}>Skip</button>
+            <button class="ghost mini" data-pending-action="approve" type="button"${pendingActionSubmitting ? " disabled" : ""}>${escapeHtml(pendingLabels.approve)}</button>
+            <button class="ghost mini" data-pending-action="skip" type="button"${pendingActionSubmitting ? " disabled" : ""}>${escapeHtml(pendingLabels.skip)}</button>
           </div>
         `
         : "";
@@ -207,6 +488,23 @@ function renderChat(items) {
   if (shouldStick) {
     chatFeed.scrollTop = chatFeed.scrollHeight;
   }
+}
+
+function getPendingActionLabels() {
+  const pending = overviewCache && typeof overviewCache.pending_action === "object" ? overviewCache.pending_action : null;
+  if (pending && pending.kind === "plan" && pending.plan_kind === "daily_plan") {
+    return { approve: "Save Today's Plan", skip: "Not Now" };
+  }
+  if (pending && pending.kind === "plan" && pending.plan_kind === "close_day_review") {
+    return { approve: "Save Today's Reflection", skip: "Not Now" };
+  }
+  if (pending && pending.kind === "tool") {
+    return { approve: "Run This", skip: "Cancel" };
+  }
+  if (pending && pending.kind === "save") {
+    return { approve: "Save It", skip: "Not Now" };
+  }
+  return { approve: "Approve", skip: "Skip" };
 }
 
 function renderCurrentContext(data) {
@@ -353,6 +651,11 @@ async function renderReviewPanel(forceRefresh = false) {
 }
 
 async function sendChat(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (normalized === "start my day" || normalized === "close my day") {
+    suppressDailyCheckinPromptUntil = Date.now() + 15000;
+    closeDailyCheckinModal();
+  }
   const pending = cleanChatItem({ user: text, assistant: "Nudge is thinking...", source: "nudge", pending: true });
   const baseChats = filterConversation(visibleChats, "");
   visibleChats = [...baseChats, pending].slice(-MAX_VISIBLE_CHATS);
@@ -606,10 +909,18 @@ function toggleTheme() {
   themeToggleBtn.textContent = next === "dark" ? "Light Mode" : "Dark Mode";
 }
 
-function syncDailyCheckin(dailyCheckin) {
+function syncDailyCheckin(dailyCheckin, overview = {}) {
   const shouldPrompt = Boolean(dailyCheckin.should_prompt);
-  dailyCheckinModal.classList.toggle("hidden", !shouldPrompt);
-  dailyCheckinModal.setAttribute("aria-hidden", shouldPrompt ? "false" : "true");
+  const pending = overview && typeof overview.pending_action === "object" ? overview.pending_action : null;
+  const latestQuery = String((overview && overview.runtime && overview.runtime.query) || "").trim().toLowerCase();
+  const shouldSuppress =
+    Date.now() < suppressDailyCheckinPromptUntil ||
+    Boolean(pending) ||
+    latestQuery === "start my day" ||
+    latestQuery === "close my day";
+  const shouldShow = shouldPrompt && !shouldSuppress;
+  dailyCheckinModal.classList.toggle("hidden", !shouldShow);
+  dailyCheckinModal.setAttribute("aria-hidden", shouldShow ? "false" : "true");
 }
 
 function closeDailyCheckinModal() {
@@ -873,6 +1184,22 @@ function escapeAttr(value) {
 
 function wireEvents() {
   refreshBtn.addEventListener("click", loadOverview);
+  topbarStartDayBtn.addEventListener("click", async () => {
+    await sendChat("start my day");
+  });
+  topbarCloseDayBtn.addEventListener("click", async () => {
+    await sendChat("close my day");
+  });
+  if (heroStartDayBtn) {
+    heroStartDayBtn.addEventListener("click", async () => {
+      await sendChat("start my day");
+    });
+  }
+  if (heroCloseDayBtn) {
+    heroCloseDayBtn.addEventListener("click", async () => {
+      await sendChat("close my day");
+    });
+  }
   reviewBtn.addEventListener("click", () => {
     switchContextTab("review");
     renderReviewPanel(true);
@@ -889,6 +1216,11 @@ function wireEvents() {
   });
   inlineReviewBtn.addEventListener("click", () => renderReviewPanel(true));
   themeToggleBtn.addEventListener("click", toggleTheme);
+  micBtn.addEventListener("click", toggleMicInput);
+  speakResponseBtn.addEventListener("click", speakLatestAssistantResponse);
+  startDayBtn.addEventListener("click", async () => {
+    await sendChat("start my day");
+  });
   openProjectModalBtn.addEventListener("click", () => openProjectModal("add-project"));
   openProjectPanelBtn.addEventListener("click", () => {
     switchContextTab("projects");

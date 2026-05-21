@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.services.storage import read_json, write_json
 from app.utils.time import now_local_iso
@@ -12,7 +12,7 @@ def append_conversation(
     user_text: str,
     assistant_text: str,
     source: str,
-    tool_result: dict[str, Any] | None = None,
+    tool_result: Optional[dict[str, Any]] = None,
 ) -> None:
     items = read_json(path, default=[])
     if not isinstance(items, list):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Optional
 
 from app.config import Config
 from runtime.service import NudgeRuntime
@@ -16,24 +17,24 @@ class NudgeAgent:
         return self._runtime.run_sync(user_text, source="cli")
 
 
-def run_agent(user_text: str, cfg: Config | None = None, source: str = "cli") -> str:
+def run_agent(user_text: str, cfg: Optional[Config] = None, source: str = "cli") -> str:
     runtime = _get_runtime(cfg or Config.load())
     return runtime.run_sync(user_text, source=source)
 
 
-def pending_action(action: str, cfg: Config | None = None) -> str:
+def pending_action(action: str, cfg: Optional[Config] = None) -> str:
     runtime = _get_runtime(cfg or Config.load())
     if action not in {"approve", "skip"}:
         return runtime.run_sync(action, source="dashboard")
     return asyncio.run(runtime.pending_action(action))
 
 
-def pending_action_result(action: str, cfg: Config | None = None):
+def pending_action_result(action: str, cfg: Optional[Config] = None):
     runtime = _get_runtime(cfg or Config.load())
     return asyncio.run(runtime.pending_action_response(action, source="dashboard", persist=True))
 
 
-def pending_save_action(action: str, cfg: Config | None = None) -> str:
+def pending_save_action(action: str, cfg: Optional[Config] = None) -> str:
     return pending_action(action, cfg=cfg)
 
 

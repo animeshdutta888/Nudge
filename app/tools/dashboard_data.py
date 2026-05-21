@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Optional
 
 from app.services.conversations import load_conversations
 from app.services.storage import read_json
 from app.agent.state import StateStore
+from app.tools.daily_plan import latest_daily_plan
 from app.tools.projects import load_projects
 from app.tools.repair import recent_items
 from app.tools.reminders import next_due_reminder
@@ -64,6 +65,7 @@ def build_dashboard_payload(data_dir: Path) -> dict[str, Any]:
             "due_ts": due_reminder.due_ts,
         },
         "projects": projects[:8],
+        "daily_plan": latest_daily_plan(data_dir / "daily_plans.json"),
         "timeline": _timeline(logs, notes, reminders, conversations),
         "activity_by_day": [
             {"day": day, "count": count}
@@ -233,7 +235,7 @@ def _display_assistant_text(text: str) -> str:
     return assistant_display_text(text)
 
 
-def _pending_action(path: Path) -> dict[str, Any] | None:
+def _pending_action(path: Path) -> Optional[dict[str, Any]]:
     raw = read_json(path, default={})
     if not isinstance(raw, dict):
         return None

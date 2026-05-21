@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import re
-from typing import Any
+from typing import Any, Optional
 
 from app.models.note import Note
 from app.services.storage import read_json, write_json
@@ -16,7 +16,7 @@ class ToolError(RuntimeError):
 
 
 class ToolExecution:
-    def __init__(self, text: str, result: dict[str, Any] | None = None) -> None:
+    def __init__(self, text: str, result: Optional[dict[str, Any]] = None) -> None:
         self.text = text
         self.result = result
 
@@ -232,7 +232,7 @@ class LocalToolExecutor:
             raise ToolError(f"Path must stay inside `{self._display_path(self._workspace_root)}`.") from exc
         return path
 
-    def _resolve_base_path(self, raw: str) -> Path | None:
+    def _resolve_base_path(self, raw: str) -> Optional[Path]:
         if not raw:
             return None
         candidate = Path(raw).expanduser()
@@ -255,7 +255,7 @@ class LocalToolExecutor:
             return str(path)
         return "." if str(rel) == "." else f"./{rel}"
 
-    def _find_best_path_match(self, raw: str, base_path: Path | None = None) -> Path | None:
+    def _find_best_path_match(self, raw: str, base_path: Optional[Path] = None) -> Optional[Path]:
         target = _normalize_candidate_name(raw)
         if not target:
             return None

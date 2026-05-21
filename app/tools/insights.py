@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 
 from app.agent.memory import Memory
 from app.agent import prompts
@@ -53,8 +53,8 @@ def weekly_insights(llm_cfg: LlmConfig, memory: Memory, days: int = 7) -> str:
 def weekly_review(
     llm_cfg: LlmConfig,
     memory: Memory,
-    persona: dict | None = None,
-    reminders: list[Reminder] | None = None,
+    persona: Optional[dict] = None,
+    reminders: Optional[list[Reminder]] = None,
     days: int = 7,
 ) -> str:
     start, end = weekly_window(days)

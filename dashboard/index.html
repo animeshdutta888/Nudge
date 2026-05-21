@@ -20,6 +20,8 @@
           <div id="runtimeRibbon" class="runtime-ribbon"></div>
         </div>
         <div class="topbar-actions">
+          <button id="topbarStartDayBtn" class="primary" type="button">Start My Day</button>
+          <button id="topbarCloseDayBtn" class="ghost" type="button">Close My Day</button>
           <button id="newChatBtn" class="ghost" type="button">New Chat</button>
           <button id="refreshBtn" class="ghost" type="button">Refresh</button>
           <button id="reviewBtn" class="ghost" type="button">Review</button>
@@ -29,6 +31,27 @@
 
       <main class="workspace">
         <aside class="left-rail">
+          <section class="rail-card start-day-card start-day-card-primary">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Start My Day</p>
+                <h2>Plan today with one click.</h2>
+              </div>
+              <button id="startDayBtn" class="primary" type="button">Build Today's Plan</button>
+            </div>
+            <div id="startDayStatus" class="start-day-status">Ready when you are.</div>
+            <div id="startDaySummary" class="start-day-summary muted-copy">
+              Nudge will look at your projects, reminders, and recent context, then suggest a focused plan for today.
+            </div>
+            <div id="startDayActions" class="start-day-actions hidden"></div>
+            <div id="startDayCarryForward" class="start-day-block hidden"></div>
+            <div id="startDayPriorities" class="start-day-block"></div>
+            <div>
+              <div class="start-day-trace-title">How Nudge built this</div>
+              <div id="startDayTrace" class="start-day-trace"></div>
+            </div>
+          </section>
+
           <section class="rail-card hero-card">
             <p class="rail-label">Workspace</p>
             <h2>Chat-first, private, and calm.</h2>
@@ -55,7 +78,7 @@
 
           <section class="rail-card runtime-card">
             <div class="section-head">
-              <h3>Runtime</h3>
+              <h3>System</h3>
               <span id="runtimeStatusTag" class="status-pill">Idle</span>
             </div>
             <div id="runtimeSummary" class="runtime-summary"></div>
@@ -68,11 +91,17 @@
               <p class="eyebrow soft">Conversation</p>
               <h2>Talk to Nudge</h2>
             </div>
+            <div class="chat-toolbar-actions">
+              <button id="micBtn" class="ghost mini" type="button">Mic</button>
+              <button id="speakResponseBtn" class="ghost mini" type="button">Speak Response</button>
+            </div>
             <label class="search-shell">
               <span>Search chat</span>
               <input id="conversationSearchInput" type="search" placeholder="Search messages" />
             </label>
           </div>
+
+          <div id="micStatusBar" class="mic-status hidden" aria-live="polite"></div>
 
           <div id="chatFeed" class="chat-feed"></div>
 

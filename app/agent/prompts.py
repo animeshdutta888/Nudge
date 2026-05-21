@@ -231,8 +231,10 @@ ROUTE_INTENT = (
     + "Do not invent missing fields.\n"
     + "Return ONLY JSON:\n"
     + "{{\n"
-    + '  "intent": "none|save_note|save_log|save_candidate|add_reminder|list_reminders|complete_reminder|add_project|add_goal|list_projects|show_project|complete_goal|show_persona|show_priorities|show_insights|notes_create|notes_search|notes_list|filesystem_list|filesystem_read|shell_run|approve|skip",\n'
+    + '  "intent": "none|save_note|save_log|save_candidate|add_reminder|list_reminders|complete_reminder|add_project|add_goal|list_projects|show_project|complete_goal|show_persona|show_priorities|close_day|close_day_reflection|show_daily_plan|update_daily_plan|show_insights|notes_create|notes_search|notes_list|filesystem_list|filesystem_read|shell_run|approve|skip",\n'
     + '  "text": "string",\n'
+    + '  "operation": "string",\n'
+    + '  "target": "string",\n'
     + '  "query": "string",\n'
     + '  "project": "string",\n'
     + '  "goal": "string",\n'
@@ -252,6 +254,10 @@ ROUTE_INTENT = (
     + "- Use `add_goal` when the user asks to add a goal/task under a specific project.\n"
     + "- Use `show_project` when the user asks what a named project is, how it is going, its status, or to show/open that project.\n"
     + "- Use `show_priorities` for questions about focus, priorities, what to do next, or what to focus on next.\n"
+    + "- Use `close_day` when the user asks to end the day, close the day, wrap up the day, or do an end-of-day review.\n"
+    + "- Use `close_day_reflection` for follow-up reflection messages that describe finished work, blockers, or tomorrow carry-forward items.\n"
+    + "- Use `show_daily_plan` when the user asks to show today's plan, today's agenda, or what is on today's plan.\n"
+    + "- Use `update_daily_plan` when the user asks to add, remove, replace, or edit something in today's plan.\n"
     + "- Use `show_persona` only for explicit self-knowledge/persona requests like 'show persona' or 'what do you know about me'.\n"
     + "- Use `notes_create`, `notes_search`, and `notes_list` for note-taking requests.\n"
     + "- Use `filesystem_list` to browse directories and `filesystem_read` to open/read a file.\n"
@@ -261,6 +267,7 @@ ROUTE_INTENT = (
     + "- Use `approve` or `skip` for confirmation/discard requests for pending actions.\n"
     + "- For `add_reminder`, put the scheduling fragment in `when` and the reminder body in `text`.\n"
     + "- For `save_candidate`, `save_note`, and `save_log`, put the clean memory text in `text`.\n"
+    + "- For `update_daily_plan`, set `target` to `today_plan`, set `operation` like `add|remove|replace`, and put the plan item text in `text`.\n"
     + "\nPersona JSON:\n{persona}\n"
     + "\nRecent context:\n{context}\n"
     + "\nUser input:\n{user}\n"
